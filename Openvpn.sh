@@ -11,6 +11,7 @@ function isRoot() {
 	fi
 }
 
+
 function tunAvailable() {
 	if [ ! -e /dev/net/tun ]; then
 		return 1
