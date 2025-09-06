@@ -1,9 +1,7 @@
-
 #!/bin/bash
-# shellcheck disable=SC1091,SC2164,SC2034,SC1072,SC1073,SC1009
-
 # 为 Debian, Ubuntu, CentOS, Amazon Linux 2, Fedora, Oracle Linux 8, Arch Linux, Rocky Linux 和 AlmaLinux 安装安全的 OpenVPN 服务器。
 # https://github.com/yhdxtn/OpenVpn
+# shellcheck disable=SC1091,SC2164,SC2034,SC1072,SC1073,SC1009
 
 function isRoot() {
 	if [ "$EUID" -ne 0 ]; then
@@ -404,11 +402,9 @@ function installQuestions() {
 		echo "选择你要使用的压缩算法：（按效率排序）"
 		echo "   1) LZ4-v2"
 		echo "   2) LZ4"
-		echo "   3) LZ0"
+		echo "   3) LZO"
 		until [[ $COMPRESSION_CHOICE =~ ^[1-3]$ ]]; do
-			read -rp"压缩算法 [1-3]: " -e
-
- -i 1 COMPRESSION_CHOICE
+			read -rp"压缩算法 [1-3]: " -i 1 COMPRESSION_CHOICE
 		done
 		case $COMPRESSION_CHOICE in
 		1)
@@ -418,7 +414,7 @@ function installQuestions() {
 			COMPRESSION_ALG="lz4"
 			;;
 		3)
-			COMPRESSION_ALG="lzo"
+			COMPRESSION_ALG="lzo" # 修复：将 'lz0' 改为正确的 'lzo'
 			;;
 		esac
 	fi
@@ -656,10 +652,6 @@ fi
 function installOpenVPN() {
 if [[ $AUTO_INSTALL == "y" ]]; then
 	# 设置默认选项，这样就不会再询问问题。
-	APPROVE_INSTALL=${APPROVE_INSTALL:-y}
-	APPROVE_IP=${APPROVE_IP:-y}
-	IPV6_SUPPORT=${IPV6_SUPPORT:-n}
-	PORT_CHOICE=${PORT_CHOICE:-1}
 	if [[ $IPV6_SUPPORT == "y" ]]; then
 		NETWORK_MODE=${NETWORK_MODE:-3} # 双栈
 	else
@@ -668,7 +660,6 @@ if [[ $AUTO_INSTALL == "y" ]]; then
 	PROTOCOL_CHOICE=${PROTOCOL_CHOICE:-1}
 	DNS=${DNS:-1}
 	COMPRESSION_ENABLED=${COMPRESSION_ENABLED:-n}
-	CUSTOMIZE_ENC=${CUSTOMIZE_ENC:-n}
 	CLIENT=${CLIENT:-client}
 	PASS=${PASS:-1}
 	CONTINUE=${CONTINUE:-y}
@@ -779,9 +770,9 @@ if [[ ! -d /etc/openvpn/easy-rsa/ ]]; then
 	./easyrsa init-pki
 	./easyrsa --batch --req-cn="$SERVER_CN" build-ca nopass
 
-	if [[ $DH_TYPE == "2" ]]; then
+	if [[ "$DH_TYPE" == "2" ]]; then
 		# ECDH 密钥是即时生成的，因此我们不需要预先生成它们
-		openssl dhparam -out dh.pem $DH_KEY_SIZE
+		openssl dhparam -out dh.pem "$DH_KEY_SIZE"
 	fi
 
 	./easyrsa --batch build-server-full "$SERVER_NAME" nopass
@@ -807,7 +798,7 @@ fi
 
 # 移动所有生成的文件
 cp pki/ca.crt pki/private/ca.key "pki/issued/$SERVER_NAME.crt" "pki/private/$SERVER_NAME.key" /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn
-if [[ $DH_TYPE == "2" ]]; then
+if [[ "$DH_TYPE" == "2" ]]; then
 	cp dh.pem /etc/openvpn
 fi
 
@@ -1045,6 +1036,8 @@ fi
 
 # 删除规则的脚本
 echo "#!/bin/sh" >/etc/iptables/rm-openvpn-rules.sh
+
+
 if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
 	echo "iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
 iptables -D INPUT -i tun0 -j ACCEPT
@@ -1146,7 +1139,6 @@ echo "你想用密码保护配置文件吗？"
 echo "（例如，用密码加密私钥）"
 echo "   1) 添加无密码客户端"
 echo "   2) 使用密码保护客户端"
-
 
 until [[ $PASS =~ ^[1-2]$ ]]; do
 	read -rp "选择一个选项 [1-2]: " -e -i 1 PASS
