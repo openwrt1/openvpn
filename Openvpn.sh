@@ -831,12 +831,8 @@ persist-key
 persist-tun
 keepalive 10 120" >>/etc/openvpn/server.conf
 
-# 根据网络模式配置服务器子网
-if [[ $NETWORK_MODE == "1" ]]; then # 仅 IPv4
-	echo "topology subnet
-server 10.8.0.0 255.255.255.0
-ifconfig-pool-persist ipp.txt" >>/etc/openvpn/server.conf
-elif [[ $NETWORK_MODE == "3" ]]; then # 双栈
+# 即使在仅 IPv6 模式下，也需要 server 指令来定义拓扑结构
+if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4, 仅 IPv6, 或双栈
 	echo "topology subnet
 server 10.8.0.0 255.255.255.0
 ifconfig-pool-persist ipp.txt" >>/etc/openvpn/server.conf
