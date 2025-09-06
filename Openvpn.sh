@@ -909,6 +909,7 @@ case $TLS_SIG in
 	;;
 esac
 
+
 echo "crl-verify crl.pem
 ca ca.crt
 cert $SERVER_NAME.crt
