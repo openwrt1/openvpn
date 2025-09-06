@@ -283,10 +283,20 @@ function installQuestions() {
 	echo "   3) 双栈 (IPv4 和 IPv6)"
 	until [[ $NETWORK_MODE =~ ^[1-3]$ ]]; do
 		read -rp "网络模式 [1-3]: " -e -i 1 NETWORK_MODE
-		if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]] && [[ $IPV6_SUPPORT == "n" ]]; then
-			echo "警告：你选择了 IPv6 相关的模式，但之前禁用了 IPv6 支持。这可能导致问题。"
-		fi
 	done
+
+	# 如果是仅 IPv6 模式，自动检测公共 IPv6 地址
+	if [[ $NETWORK_MODE == "2" ]]; then
+		echo ""
+		echo "在仅 IPv6 模式下，正在自动检测公共 IPv6 地址..."
+		# 尝试多种方法获取 IPv6 地址
+		PUBLIC_IP_V6=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
+		if [[ -z $PUBLIC_IP_V6 ]]; then
+			PUBLIC_IP_V6=$(curl -s -6 https://api.ipify.org)
+		fi
+		ENDPOINT=$PUBLIC_IP_V6
+		echo "检测到公共 IPv6 地址: $ENDPOINT"
+	fi
 
 	echo ""
 	echo "你希望 OpenVPN 监听哪个端口？"
@@ -1009,7 +1019,6 @@ mkdir -p /etc/iptables
 echo "#!/bin/sh" >/etc/iptables/add-openvpn-rules.sh
 if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
 	echo "iptables -t nat -I POSTROUTING 1 -s 10.8.0.0/24 -o $NIC -j MASQUERADE
-iptables -t nat -I POSTROUTING 1 -s 10.8.0.0/24 -o $NIC -j MASQUERADE
 iptables -I INPUT 1 -i tun0 -j ACCEPT
 iptables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
 iptables -I FORWARD 1 -i tun0 -o $NIC -j ACCEPT
@@ -1028,7 +1037,6 @@ fi
 echo "#!/bin/sh" >/etc/iptables/rm-openvpn-rules.sh
 if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
 	echo "iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
-iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
 iptables -D INPUT -i tun0 -j ACCEPT
 iptables -D FORWARD -i $NIC -o tun0 -j ACCEPT
 iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT
