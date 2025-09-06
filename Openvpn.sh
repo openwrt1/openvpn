@@ -815,12 +815,13 @@ fi
 chmod 644 /etc/openvpn/crl.pem
 
 # 生成 server.conf
-echo "port $PORT
-proto $PROTOCOL" >/etc/openvpn/server.conf
+echo "port $PORT" >/etc/openvpn/server.conf
 
 # 根据网络模式调整协议和服务器绑定
 if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
 	echo "proto ${PROTOCOL}6" >>/etc/openvpn/server.conf
+else # 仅 IPv4 或双栈
+	echo "proto $PROTOCOL" >>/etc/openvpn/server.conf
 fi
 
 echo "dev tun
