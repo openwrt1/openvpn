@@ -289,10 +289,23 @@ function installQuestions() {
 	if [[ $NETWORK_MODE == "2" ]]; then
 		echo ""
 		echo "在仅 IPv6 模式下，正在自动检测公共 IPv6 地址..."
-		# 尝试多种方法获取 IPv6 地址
-		PUBLIC_IP_V6=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
+		# 优先使用外部 API 检测，因为它能反映真实的外部 IP。依次尝试多个 API。
+		echo "尝试 API 1: api64.ipify.org"
+		PUBLIC_IP_V6=$(curl -s -6 --connect-timeout 5 https://api64.ipify.org)
+		
 		if [[ -z $PUBLIC_IP_V6 ]]; then
-			PUBLIC_IP_V6=$(curl -s -6 https://api.ipify.org)
+			echo "API 1 失败。尝试 API 2: ip.sb"
+			PUBLIC_IP_V6=$(curl -s -6 --connect-timeout 5 https://api.ip.sb)
+		fi
+
+		if [[ -z $PUBLIC_IP_V6 ]]; then
+			echo "API 2 失败。尝试 API 3: ifconfig.co"
+			PUBLIC_IP_V6=$(curl -s -6 --connect-timeout 5 https://ifconfig.co)
+		fi
+
+		if [[ -z $PUBLIC_IP_V6 ]]; then
+			echo "所有外部 API 检测均失败，正在尝试从本地接口查找..."
+			PUBLIC_IP_V6=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
 		fi
 		ENDPOINT=$PUBLIC_IP_V6
 		echo "检测到公共 IPv6 地址: $ENDPOINT"
@@ -1295,7 +1308,7 @@ fi
 
 function removeOpenVPN() {
 echo ""
-read -rp "你真的想移除 OpenVPN 吗？[y/n]: " -e -i n REMOVE
+read -rp "你真的想移除 OpenVPN 吗？[y/n]: " -e -i y REMOVE
 if [[ $REMOVE == 'y' ]]; then
 	# 从配置中获取 OpenVPN 端口
 	PORT=$(grep '^port ' /etc/openvpn/server.conf | cut -d " " -f 2)
