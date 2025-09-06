@@ -11,7 +11,6 @@ function isRoot() {
 	fi
 }
 
-
 function tunAvailable() {
 	if [ ! -e /dev/net/tun ]; then
 		return 1
@@ -1312,7 +1311,6 @@ function removeOpenVPN() {
 		echo "移除已中止！"
 	fi
 }
-
 
 function manageMenu() {
 	echo "欢迎使用 OpenVPN-install！"
