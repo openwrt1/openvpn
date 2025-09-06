@@ -1312,6 +1312,7 @@ function removeOpenVPN() {
 	fi
 }
 
+
 function manageMenu() {
 	echo "欢迎使用 OpenVPN-install！"
 	echo "Git 仓库地址：https://github.com/angristan/openvpn-install"
