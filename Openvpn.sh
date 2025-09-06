@@ -274,6 +274,20 @@ function installQuestions() {
 	until [[ $IPV6_SUPPORT =~ (y|n) ]]; do
 		read -rp "你想启用 IPv6 支持（NAT）吗？[y/n]: " -e -i $SUGGESTION IPV6_SUPPORT
 	done
+
+	echo ""
+
+	echo "你想为 VPN 使用哪种网络模式？"
+	echo "   1) 仅 IPv4"
+	echo "   2) 仅 IPv6"
+	echo "   3) 双栈 (IPv4 和 IPv6)"
+	until [[ $NETWORK_MODE =~ ^[1-3]$ ]]; do
+		read -rp "网络模式 [1-3]: " -e -i 1 NETWORK_MODE
+		if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]] && [[ $IPV6_SUPPORT == "n" ]]; then
+			echo "警告：你选择了 IPv6 相关的模式，但之前禁用了 IPv6 支持。这可能导致问题。"
+		fi
+	done
+
 	echo ""
 	echo "你希望 OpenVPN 监听哪个端口？"
 	echo "   1) 默认：1194"
@@ -908,7 +922,6 @@ case $TLS_SIG in
 	echo "tls-auth tls-auth.key 0" >>/etc/openvpn/server.conf
 	;;
 esac
-
 
 echo "crl-verify crl.pem
 ca ca.crt
