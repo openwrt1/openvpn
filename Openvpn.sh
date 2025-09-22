@@ -1275,7 +1275,7 @@ function newClient() {
 		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv4.ovpn" # 修复：将 'lz0' 改为正确的 'lzo'
 		# 如果是 IPv6 地址，则添加括号
 		if echo "$endpoint_v4" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v4]:$port/" "$homeDir/$CLIENT-ipv4.ovpn"
+			sed -i "s/^remote .*/remote [$endpoint_v4] $port/" "$homeDir/$CLIENT-ipv4.ovpn"
 		else
 			sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$homeDir/$CLIENT-ipv4.ovpn"
 		fi
@@ -1314,7 +1314,7 @@ function newClient() {
 		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv6.ovpn" # 修复：将 'lz0' 改为正确的 'lzo'
 		# 如果是 IPv6 地址，则添加括号
 		if echo "$endpoint_v6" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v6]:$port/" "$homeDir/$CLIENT-ipv6.ovpn"
+			sed -i "s/^remote .*/remote [$endpoint_v6] $port/" "$homeDir/$CLIENT-ipv6.ovpn"
 		else
 			sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$homeDir/$CLIENT-ipv6.ovpn"
 		fi
@@ -1448,7 +1448,7 @@ function regenerateClient() {
 		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv4.ovpn" # 修复：将 'lz0' 改为正确的 'lzo'
 		# 如果是 IPv6 地址，则添加括号
 		if echo "$endpoint_v4" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v4]:$port/" "$homeDir/$CLIENT-ipv4.ovpn"
+			sed -i "s/^remote .*/remote [$endpoint_v4] $port/" "$homeDir/$CLIENT-ipv4.ovpn"
 		else
 			sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$homeDir/$CLIENT-ipv4.ovpn"
 		fi
@@ -1487,7 +1487,7 @@ function regenerateClient() {
 		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv6.ovpn" # 修复：将 'lz0' 改为正确的 'lzo'
 		# 如果是 IPv6 地址，则添加括号
 		if echo "$endpoint_v6" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v6]:$port/" "$homeDir/$CLIENT-ipv6.ovpn"
+			sed -i "s/^remote .*/remote [$endpoint_v6] $port/" "$homeDir/$CLIENT-ipv6.ovpn"
 		else
 			sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$homeDir/$CLIENT-ipv6.ovpn"
 		fi
