@@ -1210,8 +1210,9 @@ function newClient() {
 		echo "服务器支持双栈。你想要哪种类型的客户端配置文件？"
 		echo "   1) IPv4"
 		echo "   2) IPv6"
-		until [[ $CLIENT_PROTO_CHOICE =~ ^[1-2]$ ]]; do
-			read -rp "客户端类型 [1-2]: " -e -i 1 CLIENT_PROTO_CHOICE
+		echo "   3) 生成两个文件 (IPv4 和 IPv6)"
+		until [[ $CLIENT_PROTO_CHOICE =~ ^[1-3]$ ]]; do
+			read -rp "客户端类型 [1-3]: " -e -i 1 CLIENT_PROTO_CHOICE
 		done
 	fi
 
@@ -1276,123 +1277,116 @@ function newClient() {
 		TLS_SIG="2"
 	fi
 
-	# 生成自定义的 client.ovpn
-	cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
+	# 根据选择生成一个或两个文件
 	local port
 	port=$(grep -oP '^port \K\d+' /etc/openvpn/server.conf)
-	if [[ $CLIENT_PROTO_CHOICE == "1" ]]; then # IPv4
-		local endpoint
-		endpoint=$(cat /etc/openvpn/endpoint_v4)
-		sed -i "s/^remote .*/remote $endpoint $port/" "$homeDir/$CLIENT.ovpn"
-		# Ensure proto is udp for IPv4 if server is udp
+
+	if [[ $CLIENT_PROTO_CHOICE == "1" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv4 或 两者
+		local endpoint_v4
+		endpoint_v4=$(cat /etc/openvpn/endpoint_v4)
+		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv4.ovpn"
+		sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$homeDir/$CLIENT-ipv4.ovpn"
 		if grep -q "^proto udp" /etc/openvpn/server.conf; then
-			sed -i "s/^proto .*/proto udp/" "$homeDir/$CLIENT.ovpn"
+			sed -i "s/^proto .*/proto udp/" "$homeDir/$CLIENT-ipv4.ovpn"
 		fi
-	elif [[ $CLIENT_PROTO_CHOICE == "2" ]]; then # IPv6
-		local endpoint
-		endpoint=$(cat /etc/openvpn/endpoint_v6)
-		sed -i "s/^remote .*/remote $endpoint $port/" "$homeDir/$CLIENT.ovpn"
-		# Ensure proto is udp6 for IPv6 if server is udp
-		if grep -q "^proto udp" /etc/openvpn/server.conf; then
-			sed -i "s/^proto .*/proto udp6/" "$homeDir/$CLIENT.ovpn"
-		fi
-	fi
 
-	{
-		echo "<ca>"
-		cat "/etc/openvpn/easy-rsa/pki/ca.crt"
-		echo "</ca>"
-
-		echo "<cert>"
-		awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
-		echo "</cert>"
-
-		echo "<key>"
-		cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
-		echo "</key>"
-
-		case $TLS_SIG in
-		1)
-			echo "<tls-crypt>"
-			cat /etc/openvpn/tls-crypt.key
-			echo "</tls-crypt>"
-			;;
-		2)
-			echo "key-direction 1"
-			echo "<tls-auth>"
-			cat /etc/openvpn/tls-auth.key
-			echo "</tls-auth>"
-			;;
-		esac
-	} >>"$homeDir/$CLIENT.ovpn"
-
-	echo ""
-	echo "配置文件已写入 $homeDir/$CLIENT.ovpn。"
-	echo "下载 .ovpn 文件并将其导入你的 OpenVPN 客户端。"
-
-	exit 0
-}
-
-function generateClientOvpnFile() {
-	local CLIENT="$1"
-	# 用户的主目录，将写入客户端配置文件
-	if [ -e "/home/${CLIENT}" ]; then
-		# 如果 $1 是用户名
-		homeDir="/home/${CLIENT}"
-	elif [ "${SUDO_USER}" ]; then
-		# 如果不是，使用 SUDO_USER
-		if [ "${SUDO_USER}" == "root" ]; then
-			# 如果以 root 身份运行 sudo
-			homeDir="/root"
-		else
-			homeDir="/home/${SUDO_USER}"
-		fi
-	else
-		# 如果不是 SUDO_USER，使用 /root
-		homeDir="/root"
-	fi
-
-	# 确定我们使用的是 tls-auth 还是 tls-crypt
-	if grep -qs "^tls-crypt" /etc/openvpn/server.conf; then
-		TLS_SIG="1"
-	elif grep -qs "^tls-auth" /etc/openvpn/server.conf; then
-		TLS_SIG="2"
-	fi
-
-	# 生成自定义的 client.ovpn
-	cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
-
-	{
-		echo "<ca>"
-		cat "/etc/openvpn/easy-rsa/pki/ca.crt"
-		echo "</ca>"
-		echo "<cert>"
-		awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
-		echo "</cert>"
-		echo "<key>"
-		cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
-		echo "</key>"
-		[[ "$TLS_SIG" == "1" ]] && { echo "<tls-crypt>"; cat /etc/openvpn/tls-crypt.key; echo "</tls-crypt>"; }
-		[[ "$TLS_SIG" == "2" ]] && { echo "key-direction 1"; echo "<tls-auth>"; cat /etc/openvpn/tls-auth.key; echo "</tls-auth>"; }
-	} >>"$homeDir/$CLIENT.ovpn"
-
-	echo ""
-	echo "配置文件已成功生成/重新生成于: $homeDir/$CLIENT.ovpn"
-	echo "下载 .ovpn 文件并将其导入你的 OpenVPN 客户端。"
-}
-
-function listClients() {
-	NUMBEROFCLIENTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c "^V")
-	if [[ $NUMBEROFCLIENTS == '0' ]]; then
+		{
+			echo "<ca>"
+			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
+			echo "</ca>"
+			echo "<cert>"
+			awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
+			echo "</cert>"
+			echo "<key>"
+			cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
+			echo "</key>"
+			case $TLS_SIG in
+			1)
+				echo "<tls-crypt>"
+				cat /etc/openvpn/tls-crypt.key
+				echo "</tls-crypt>"
+				;;
+			2)
+				echo "key-direction 1"
+				echo "<tls-auth>"
+				cat /etc/openvpn/tls-auth.key
+				echo "</tls-auth>"
+				;;
+			esac
+		} >>"$homeDir/$CLIENT-ipv4.ovpn"
 		echo ""
-		echo "您还没有任何客户端！"
-		return 1
+		echo "IPv4 配置文件已写入 $homeDir/$CLIENT-ipv4.ovpn。"
 	fi
 
-	echo ""
-	echo "已有的客户端列表:"
-	tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep "^V" | cut -d '=' -f 2 | nl -s ') '
-	return 0
+	if [[ $CLIENT_PROTO_CHOICE == "2" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv6 或 两者
+		local endpoint_v6
+		endpoint_v6=$(cat /etc/openvpn/endpoint_v6)
+		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv6.ovpn"
+		sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$homeDir/$CLIENT-ipv6.ovpn"
+		if grep -q "^proto udp" /etc/openvpn/server.conf; then
+			sed -i "s/^proto .*/proto udp6/" "$homeDir/$CLIENT-ipv6.ovpn"
+		fi
+
+		{
+			echo "<ca>"
+			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
+			echo "</ca>"
+			echo "<cert>"
+			awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
+			echo "</cert>"
+			echo "<key>"
+			cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
+			echo "</key>"
+			case $TLS_SIG in
+			1)
+				echo "<tls-crypt>"
+				cat /etc/openvpn/tls-crypt.key
+				echo "</tls-crypt>"
+				;;
+			2)
+				echo "key-direction 1"
+				echo "<tls-auth>"
+				cat /etc/openvpn/tls-auth.key
+				echo "</tls-auth>"
+				;;
+			esac
+		} >>"$homeDir/$CLIENT-ipv6.ovpn"
+		echo ""
+		echo "IPv6 配置文件已写入 $homeDir/$CLIENT-ipv6.ovpn。"
+	fi
+
+	if [[ $CLIENT_PROTO_CHOICE -eq 0 ]]; then # 服务器不是双栈
+		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
+		{
+			echo "<ca>"
+			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
+			echo "</ca>"
+			echo "<cert>"
+			awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
+			echo "</cert>"
+			echo "<key>"
+			cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
+			echo "</key>"
+			case $TLS_SIG in
+			1)
+				echo "<tls-crypt>"
+				cat /etc/openvpn/tls-crypt.key
+				echo "</tls-crypt>"
+				;;
+			2)
+				echo "key-direction 1"
+				echo "<tls-auth>"
+				cat /etc/openvpn/tls-auth.key
+				echo "</tls-auth>"
+				;;
+			esac
+		} >>"$homeDir/$CLIENT.ovpn"
+		echo ""
+		echo "配置文件已写入 $homeDir/$CLIENT.ovpn。"
+	fi
+
+	echo "下载 .ovpn 文件并将其导入你的 OpenVPN 客户端。"
+	exit 0
 }
 
 function regenerateClient() {
@@ -1405,24 +1399,158 @@ function regenerateClient() {
 		read -rp "选择一个客户端以重新生成配置 [1-$NUMBEROFCLIENTS]: " CLIENTNUMBER
 	done
 
-	CLIENT=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep "^V" | cut -d '=' -f 2 | sed -n "$CLIENTNUMBER"p)
-	
-	# 设置 PASS=1 以跳过密码提示，因为我们只是重新生成文件
-	PASS=1
-	
-	# 检查客户端是否存在，然后调用 newClient 的核心逻辑来生成文件
-	# 我们需要绕过 newClient 开头的 exit 检查
+	CLIENT=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep "^V" | cut -d '=' -f 2 | sed -n "${CLIENTNUMBER}"p)
+
 	CLIENTEXISTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c -E "/CN=$CLIENT\$")
-	if [[ $CLIENTEXISTS == '1' ]]; then
-		# 客户端存在，直接生成配置文件
-		echo "为客户端 $CLIENT 重新生成配置文件..."
-		# 调用重构后的函数来生成文件
-		generateClientOvpnFile "$CLIENT"
-	else
+	if [[ $CLIENTEXISTS != '1' ]]; then
 		echo ""
 		echo "错误：客户端 $CLIENT 不存在。"
 		exit 1
 	fi
+
+	echo "为客户端 $CLIENT 重新生成配置文件..."
+
+	CLIENT_PROTO_CHOICE=0
+	if [[ -s /etc/openvpn/endpoint_v4 && -s /etc/openvpn/endpoint_v6 ]]; then
+		echo ""
+		echo "服务器支持双栈。你想要哪种类型的客户端配置文件？"
+		echo "   1) IPv4"
+		echo "   2) IPv6"
+		echo "   3) 生成两个文件 (IPv4 和 IPv6)"
+		until [[ $CLIENT_PROTO_CHOICE =~ ^[1-3]$ ]]; do
+			read -rp "客户端类型 [1-3]: " -e -i 1 CLIENT_PROTO_CHOICE
+		done
+	fi
+
+	# 用户的主目录，将写入客户端配置文件
+	if [ -e "/home/${CLIENT}" ]; then
+		homeDir="/home/${CLIENT}"
+	elif [ "${SUDO_USER}" ]; then
+		if [ "${SUDO_USER}" == "root" ]; then
+			homeDir="/root"
+		else
+			homeDir="/home/${SUDO_USER}"
+		fi
+	else
+		homeDir="/root"
+	fi
+
+	# 确定我们使用的是 tls-auth 还是 tls-crypt
+	if grep -qs "^tls-crypt" /etc/openvpn/server.conf; then
+		TLS_SIG="1"
+	elif grep -qs "^tls-auth" /etc/openvpn/server.conf; then
+		TLS_SIG="2"
+	fi
+
+	# 根据选择生成一个或两个文件
+	local port
+	port=$(grep -oP '^port \K\d+' /etc/openvpn/server.conf)
+
+	if [[ $CLIENT_PROTO_CHOICE == "1" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv4 或 两者
+		local endpoint_v4
+		endpoint_v4=$(cat /etc/openvpn/endpoint_v4)
+		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv4.ovpn"
+		sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$homeDir/$CLIENT-ipv4.ovpn"
+		if grep -q "^proto udp" /etc/openvpn/server.conf; then
+			sed -i "s/^proto .*/proto udp/" "$homeDir/$CLIENT-ipv4.ovpn"
+		fi
+
+		{
+			echo "<ca>"
+			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
+			echo "</ca>"
+			echo "<cert>"
+			awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
+			echo "</cert>"
+			echo "<key>"
+			cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
+			echo "</key>"
+			case $TLS_SIG in
+			1)
+				echo "<tls-crypt>"
+				cat /etc/openvpn/tls-crypt.key
+				echo "</tls-crypt>"
+				;;
+			2)
+				echo "key-direction 1"
+				echo "<tls-auth>"
+				cat /etc/openvpn/tls-auth.key
+				echo "</tls-auth>"
+				;;
+			esac
+		} >>"$homeDir/$CLIENT-ipv4.ovpn"
+		echo ""
+		echo "IPv4 配置文件已重新生成于 $homeDir/$CLIENT-ipv4.ovpn。"
+	fi
+
+	if [[ $CLIENT_PROTO_CHOICE == "2" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv6 或 两者
+		local endpoint_v6
+		endpoint_v6=$(cat /etc/openvpn/endpoint_v6)
+		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv6.ovpn"
+		sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$homeDir/$CLIENT-ipv6.ovpn"
+		if grep -q "^proto udp" /etc/openvpn/server.conf; then
+			sed -i "s/^proto .*/proto udp6/" "$homeDir/$CLIENT-ipv6.ovpn"
+		fi
+
+		{
+			echo "<ca>"
+			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
+			echo "</ca>"
+			echo "<cert>"
+			awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
+			echo "</cert>"
+			echo "<key>"
+			cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
+			echo "</key>"
+			case $TLS_SIG in
+			1)
+				echo "<tls-crypt>"
+				cat /etc/openvpn/tls-crypt.key
+				echo "</tls-crypt>"
+				;;
+			2)
+				echo "key-direction 1"
+				echo "<tls-auth>"
+				cat /etc/openvpn/tls-auth.key
+				echo "</tls-auth>"
+				;;
+			esac
+		} >>"$homeDir/$CLIENT-ipv6.ovpn"
+		echo ""
+		echo "IPv6 配置文件已重新生成于 $homeDir/$CLIENT-ipv6.ovpn。"
+	fi
+
+	if [[ $CLIENT_PROTO_CHOICE -eq 0 ]]; then # 服务器不是双栈
+		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
+		{
+			echo "<ca>"
+			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
+			echo "</ca>"
+			echo "<cert>"
+			awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
+			echo "</cert>"
+			echo "<key>"
+			cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
+			echo "</key>"
+			case $TLS_SIG in
+			1)
+				echo "<tls-crypt>"
+				cat /etc/openvpn/tls-crypt.key
+				echo "</tls-crypt>"
+				;;
+			2)
+				echo "key-direction 1"
+				echo "<tls-auth>"
+				cat /etc/openvpn/tls-auth.key
+				echo "</tls-auth>"
+				;;
+			esac
+		} >>"$homeDir/$CLIENT.ovpn"
+		echo ""
+		echo "配置文件已重新生成于 $homeDir/$CLIENT.ovpn。"
+	fi
+
+	echo "下载 .ovpn 文件并将其导入你的 OpenVPN 客户端。"
 }
 
 function revokeClient() {
