@@ -363,7 +363,7 @@ function installQuestions() {
 	echo "你希望 OpenVPN 使用哪种协议？"
 	echo "UDP 更快。除非不可用，否则不应使用 TCP。"
 	echo "   1) UDP"
-		echo "   2) TCP"
+	echo "   2) TCP"
 	until [[ $PROTOCOL_CHOICE =~ ^[1-2]$ ]]; do
 		read -rp "协议 [1-2]: " -e -i 1 PROTOCOL_CHOICE
 	done
@@ -677,106 +677,63 @@ function installQuestions() {
 }
 
 function configureFirewall() {
-	# 如果 UFW 正在运行，则使用 ufw 命令
-	if ufw status | grep -qw active; then
-		echo "检测到 UFW 防火墙处于活动状态。将使用 ufw 命令配置规则。"
+	# 使用传统的 iptables 方法
+	echo "将使用 iptables 配置规则。"
+	# 在两个脚本中添加 iptables 规则
+	mkdir -p /etc/iptables
 
-		# 允许 OpenVPN 端口
-		ufw allow "$PORT/$PROTOCOL"
-
-		# 配置转发策略
-		# 首先，确保 /etc/default/ufw 中的 DEFAULT_FORWARD_POLICY 设置为 ACCEPT
-		if ! grep -q "DEFAULT_FORWARD_POLICY=\"ACCEPT\"" /etc/default/ufw; then
-			echo "正在配置 UFW 转发策略..."
-			sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
-		fi
-
-		# 健壮地在 /etc/ufw/before.rules 中添加 NAT 规则
-		if ! grep -q "^\*nat" /etc/ufw/before.rules; then
-			# 如果 *nat 表不存在，则在文件顶部创建它
-			echo "未找到现有的 *nat 表，正在创建..."
-			sed -i '1s;^;# START NAT TABLE\n*nat\n:POSTROUTING ACCEPT [0:0]\n\nCOMMIT\n# END NAT TABLE\n;' /etc/ufw/before.rules
-		fi
-
-		# 添加 IPv4 NAT 规则
-		if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then
-			if ! grep -q "10.8.0.0/24 -o $NIC -j MASQUERADE" /etc/ufw/before.rules; then
-				echo "正在为 UFW 添加 OpenVPN IPv4 NAT 规则..."
-				sed -i "/^:POSTROUTING/a -A POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE # openvpn-ipv4-nat" /etc/ufw/before.rules
-			fi
-		fi
-
-		# 添加 IPv6 NAT 规则
-		if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then
-			if [[ $IPV6_SUPPORT == 'y' ]] && ! grep -q "fd42:42:42:42::/112 -o $NIC -j MASQUERADE" /etc/ufw/before.rules; then
-				echo "正在为 UFW 添加 OpenVPN IPv6 NAT 规则..."
-				sed -i "/^:POSTROUTING/a -A POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE # openvpn-ipv6-nat" /etc/ufw/before.rules
-			fi
-		fi
-
-		# 重载 UFW 以应用更改
-		if ! ufw reload; then
-			echo "错误：UFW 规则重载失败。防火墙可能处于不稳定状态。请手动检查 'ufw status' 和 '/etc/ufw/before.rules'。"
-			exit 1
-		fi
-	else
-		# 否则，使用传统的 iptables 方法
-		echo "未检测到活动的 UFW。将使用 iptables 配置规则。"
-		# 在两个脚本中添加 iptables 规则
-		mkdir -p /etc/iptables
-
-		# 添加规则的脚本
-		echo "#!/bin/sh" >/etc/iptables/add-openvpn-rules.sh
-		if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
-			echo "iptables -t nat -I POSTROUTING 1 -s 10.8.0.0/24 -o $NIC -j MASQUERADE
+	# 添加规则的脚本
+	echo "#!/bin/sh" >/etc/iptables/add-openvpn-rules.sh
+	if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
+		echo "iptables -t nat -I POSTROUTING 1 -s 10.8.0.0/24 -o $NIC -j MASQUERADE
 iptables -I INPUT 1 -i tun0 -j ACCEPT
 iptables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
 iptables -I FORWARD 1 -i tun0 -o $NIC -j ACCEPT
 iptables -I INPUT 1 -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" >>/etc/iptables/add-openvpn-rules.sh
-		fi
+	fi
 
-		if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
-			echo "ip6tables -t nat -I POSTROUTING 1 -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
+	if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
+		echo "ip6tables -t nat -I POSTROUTING 1 -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
 ip6tables -I INPUT 1 -i tun0 -j ACCEPT
 ip6tables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
 ip6tables -I FORWARD 1 -i tun0 -o $NIC -j ACCEPT
 ip6tables -I INPUT 1 -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" >>/etc/iptables/add-openvpn-rules.sh
-		fi
+	fi
 
-		# 删除规则的脚本
-		echo "#!/bin/sh" >/etc/iptables/rm-openvpn-rules.sh
+	# 删除规则的脚本
+	echo "#!/bin/sh" >/etc/iptables/rm-openvpn-rules.sh
 
-		if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
-			echo "iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
+	if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
+		echo "iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
 iptables -D INPUT -i tun0 -j ACCEPT
 iptables -D FORWARD -i $NIC -o tun0 -j ACCEPT
 iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT
 iptables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" >>/etc/iptables/rm-openvpn-rules.sh
-		fi
+	fi
 
-		if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
-			echo "ip6tables -t nat -D POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
+	if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
+		echo "ip6tables -t nat -D POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
 ip6tables -D INPUT -i tun0 -j ACCEPT
 ip6tables -D FORWARD -i $NIC -o tun0 -j ACCEPT
 ip6tables -D FORWARD -i tun0 -o $NIC -j ACCEPT
 ip6tables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" >>/etc/iptables/rm-openvpn-rules.sh
-		fi
+	fi
 
-		chmod +x /etc/iptables/add-openvpn-rules.sh
-		chmod +x /etc/iptables/rm-openvpn-rules.sh
+	chmod +x /etc/iptables/add-openvpn-rules.sh
+	chmod +x /etc/iptables/rm-openvpn-rules.sh
 
-		# 通过 systemd 或 openrc 脚本处理规则
-		if [[ "$OS" == "alpine" ]]; then
-			echo "#!/sbin/openrc-run" >/etc/init.d/iptables-openvpn
-			echo "description=\"iptables rules for OpenVPN\"" >>/etc/init.d/iptables-openvpn
-			echo "depend() { need net; }" >>/etc/init.d/iptables-openvpn
-			echo "start() { /etc/iptables/add-openvpn-rules.sh; }" >>/etc/init.d/iptables-openvpn
-			echo "stop() { /etc/iptables/rm-openvpn-rules.sh; }" >>/etc/init.d/iptables-openvpn
-			chmod +x /etc/init.d/iptables-openvpn
-			rc-update add iptables-openvpn default
-			rc-service iptables-openvpn start
-		else
-			echo "[Unit]
+	# 通过 systemd 或 openrc 脚本处理规则
+	if [[ "$OS" == "alpine" ]]; then
+		echo "#!/sbin/openrc-run" >/etc/init.d/iptables-openvpn
+		echo "description=\"iptables rules for OpenVPN\"" >>/etc/init.d/iptables-openvpn
+		echo "depend() { need net; }" >>/etc/init.d/iptables-openvpn
+		echo "start() { /etc/iptables/add-openvpn-rules.sh; }" >>/etc/init.d/iptables-openvpn
+		echo "stop() { /etc/iptables/rm-openvpn-rules.sh; }" >>/etc/init.d/iptables-openvpn
+		chmod +x /etc/init.d/iptables-openvpn
+		rc-update add iptables-openvpn default
+		rc-service iptables-openvpn start
+	else
+		echo "[Unit]
 Description=iptables rules for OpenVPN
 Before=network-online.target
 Wants=network-online.target
@@ -790,11 +747,10 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target" >/etc/systemd/system/iptables-openvpn.service
 
-			# 启用服务并应用规则
-			systemctl daemon-reload
-			systemctl enable iptables-openvpn
-			systemctl start iptables-openvpn
-		fi
+		# 启用服务并应用规则
+		systemctl daemon-reload
+		systemctl enable iptables-openvpn
+		systemctl start iptables-openvpn
 	fi
 }
 
@@ -1551,34 +1507,17 @@ function removeUnbound() {
 }
 
 function removeFirewallRules() {
-	# 如果 UFW 正在运行，则使用 ufw 命令
-	if ufw status | grep -qw active; then
-		echo "检测到 UFW 防火墙处于活动状态。正在移除相关规则..."
-		ufw delete allow "$PORT/$PROTOCOL"
-		
-		# 从 /etc/ufw/before.rules 中移除 NAT 规则
-		if grep -q "# openvpn-ipv4-nat" /etc/ufw/before.rules; then
-			echo "正在从 UFW 中移除 OpenVPN IPv4 NAT 规则..."
-			sed -i '/# openvpn-ipv4-nat/d' /etc/ufw/before.rules
-		fi
-		if grep -q "# openvpn-ipv6-nat" /etc/ufw/before.rules; then
-			echo "正在从 UFW 中移除 OpenVPN IPv6 NAT 规则..."
-			sed -i '/# openvpn-ipv6-nat/d' /etc/ufw/before.rules
-		fi
-		ufw reload
+	# 使用传统的 iptables 方法
+	if [[ "$OS" == "alpine" ]]; then
+		rc-service iptables-openvpn stop
+		rc-update del iptables-openvpn default
+		rm /etc/init.d/iptables-openvpn
 	else
-		# 否则，使用传统的 iptables 方法
-		if [[ "$OS" == "alpine" ]]; then
-			rc-service iptables-openvpn stop
-			rc-update del iptables-openvpn default
-			rm /etc/init.d/iptables-openvpn
-		else
-			systemctl stop iptables-openvpn
-			systemctl disable iptables-openvpn
-			rm /etc/systemd/system/iptables-openvpn.service
-		fi
-		rm -rf /etc/iptables
+		systemctl stop iptables-openvpn
+		systemctl disable iptables-openvpn
+		rm /etc/systemd/system/iptables-openvpn.service
 	fi
+	rm -rf /etc/iptables
 }
 
 function removeOpenVPN() {
