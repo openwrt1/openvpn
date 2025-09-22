@@ -691,29 +691,34 @@ function configureFirewall() {
 			sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
 		fi
 
-		# 其次，在 /etc/ufw/before.rules 中添加 NAT 规则
-		if ! grep -q "openvpn-nat-rules" /etc/ufw/before.rules; then
-			echo "正在为 UFW 添加 NAT 规则..."
-			# 在 *filter 之前插入 NAT 规则
-			sed -i '/\*filter/i \
-# START OPENVPN NAT RULES (openvpn-nat-rules)\n\
-*nat\n\
-:POSTROUTING ACCEPT [0:0]\n\
--A POSTROUTING -s 10.8.0.0/24 -o '"$NIC"' -j MASQUERADE\n\
-COMMIT\n\
-# END OPENVPN NAT RULES\n' /etc/ufw/before.rules
+		# 健壮地在 /etc/ufw/before.rules 中添加 NAT 规则
+		if ! grep -q "^\*nat" /etc/ufw/before.rules; then
+			# 如果 *nat 表不存在，则在文件顶部创建它
+			echo "未找到现有的 *nat 表，正在创建..."
+			sed -i '1s;^;# START NAT TABLE\n*nat\n:POSTROUTING ACCEPT [0:0]\n\nCOMMIT\n# END NAT TABLE\n;' /etc/ufw/before.rules
 		fi
-		
-		# 如果支持 IPv6，也添加 IPv6 的 NAT 规则
-		if [[ $IPV6_SUPPORT == 'y' ]] && ! grep -q "fd42:42:42:42::/112" /etc/ufw/before.rules; then
-			echo "正在为 UFW 添加 IPv6 NAT 规则..."
-			# 修正 UFW 的 IPv6 NAT 规则，使其与 ip6tables 兼容
-			sed -i "/-A POSTROUTING -s 10.8.0.0\/24/a -A POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE" /etc/ufw/before.rules
+
+		# 添加 IPv4 NAT 规则
+		if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then
+			if ! grep -q "10.8.0.0/24 -o $NIC -j MASQUERADE" /etc/ufw/before.rules; then
+				echo "正在为 UFW 添加 OpenVPN IPv4 NAT 规则..."
+				sed -i "/^:POSTROUTING/a -A POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE # openvpn-ipv4-nat" /etc/ufw/before.rules
+			fi
+		fi
+
+		# 添加 IPv6 NAT 规则
+		if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then
+			if [[ $IPV6_SUPPORT == 'y' ]] && ! grep -q "fd42:42:42:42::/112 -o $NIC -j MASQUERADE" /etc/ufw/before.rules; then
+				echo "正在为 UFW 添加 OpenVPN IPv6 NAT 规则..."
+				sed -i "/^:POSTROUTING/a -A POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE # openvpn-ipv6-nat" /etc/ufw/before.rules
+			fi
 		fi
 
 		# 重载 UFW 以应用更改
-		ufw reload
-
+		if ! ufw reload; then
+			echo "错误：UFW 规则重载失败。防火墙可能处于不稳定状态。请手动检查 'ufw status' 和 '/etc/ufw/before.rules'。"
+			exit 1
+		fi
 	else
 		# 否则，使用传统的 iptables 方法
 		echo "未检测到活动的 UFW。将使用 iptables 配置规则。"
@@ -1552,9 +1557,13 @@ function removeFirewallRules() {
 		ufw delete allow "$PORT/$PROTOCOL"
 		
 		# 从 /etc/ufw/before.rules 中移除 NAT 规则
-		if grep -q "openvpn-nat-rules" /etc/ufw/before.rules; then
-			echo "正在从 UFW 中移除 NAT 规则..."
-			sed -i '/# START OPENVPN NAT RULES/,/# END OPENVPN NAT RULES/d' /etc/ufw/before.rules
+		if grep -q "# openvpn-ipv4-nat" /etc/ufw/before.rules; then
+			echo "正在从 UFW 中移除 OpenVPN IPv4 NAT 规则..."
+			sed -i '/# openvpn-ipv4-nat/d' /etc/ufw/before.rules
+		fi
+		if grep -q "# openvpn-ipv6-nat" /etc/ufw/before.rules; then
+			echo "正在从 UFW 中移除 OpenVPN IPv6 NAT 规则..."
+			sed -i '/# openvpn-ipv6-nat/d' /etc/ufw/before.rules
 		fi
 		ufw reload
 	else
