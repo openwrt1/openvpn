@@ -239,47 +239,15 @@ function installQuestions() {
 	echo "在开始设置之前，我需要问你几个问题。"
 	echo "你可以保留默认选项，并在确认时按回车键。"
 	echo ""
-	echo "我需要知道你希望 OpenVPN 监听的网络接口的 IPv4 地址。"
-	echo "除非你的服务器在 NAT 后面，否则应该是你的公共 IPv4 地址。"
 
 	# 检测公共 IPv4 地址并预填充
 	IP=$(ip -4 addr | sed -ne 's|^.* inet \([^/]*\)/.* scope global.*$|\1|p' | head -1)
-
 	if [[ -z $IP ]]; then
 		# 检测公共 IPv6 地址
 		IP=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
 	fi
-	APPROVE_IP=${APPROVE_IP:-n}
-	if [[ $APPROVE_IP =~ n ]]; then
-		read -rp "IP 地址: " -e -i "$IP" IP
-	fi
-	# 如果 $IP 是私有 IP 地址，服务器必须在 NAT 后面
-	if echo "$IP" | grep -qE '^(10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.|192\.168)'; then
-		echo ""
-		echo "看起来这台服务器在 NAT 后面。我们需要它的公共地址或主机名。"
-		
-		if [[ $NETWORK_MODE == "3" ]]; then
-			PUBLIC_IP_V4=$(curl -s https://api.ipify.org)
-			read -rp "公共 IPv4 地址或主机名: " -e -i "$PUBLIC_IP_V4" ENDPOINT_V4
-			
-			if ! [[ "$ENDPOINT_V4" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! [[ "$ENDPOINT_V4" =~ .*:.* ]]; then
-				ENDPOINT_V6=$ENDPOINT_V4
-				echo "检测到主机名，将用于 IPv4 和 IPv6。"
-			else
-				PUBLIC_IP_V6=$(curl -s https://api64.ipify.org)
-				read -rp "公共 IPv6 地址 (如果可用): " -e -i "$PUBLIC_IP_V6" ENDPOINT_V6
-			fi
-		else
-			PUBLICIP=$(curl -s https://api.ipify.org)
-			until [[ $ENDPOINT != "" ]]; do
-				read -rp "公共 IPv4 地址或主机名: " -e -i "$PUBLICIP" ENDPOINT
-			done
-		fi
-	fi
 
-	echo ""
 	echo "检查 IPv6 连接..."
-	echo ""
 	# "ping6" 和 "ping -6" 可用性因发行版而异
 	if type ping6 >/dev/null 2>&1; then
 		PING6="ping6 -c3 ipv6.google.com > /dev/null 2>&1"
@@ -293,14 +261,12 @@ function installQuestions() {
 		echo "你的主机似乎没有 IPv6 连接。"
 		SUGGESTION="n"
 	fi
-	echo ""
 	# 无论是否可用，询问用户是否要启用 IPv6 支持。
 	until [[ $IPV6_SUPPORT =~ (y|n) ]]; do
 		read -rp "你想启用 IPv6 支持（NAT）吗？[y/n]: " -e -i $SUGGESTION IPV6_SUPPORT
 	done
 
 	echo ""
-
 	echo "你想为 VPN 使用哪种网络模式？"
 	echo "   1) 仅 IPv4"
 	echo "   2) 仅 IPv6"
@@ -309,8 +275,44 @@ function installQuestions() {
 		read -rp "网络模式 [1-3]: " -e -i 1 NETWORK_MODE
 	done
 
+	echo ""
+	echo "我需要知道你希望 OpenVPN 监听的网络接口的 IP 地址。"
+	APPROVE_IP=${APPROVE_IP:-n}
+	if [[ $APPROVE_IP =~ n ]]; then
+		read -rp "IP 地址: " -e -i "$IP" IP
+	fi
+
+	# 如果 $IP 是私有 IP 地址，服务器必须在 NAT 后面
+	if echo "$IP" | grep -qE '^(10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.|192\.168)'; then
+		echo ""
+		echo "看起来这台服务器在 NAT 后面。我们需要它的公共地址或主机名。"
+
+		if [[ $NETWORK_MODE == "3" ]]; then
+			PUBLIC_IP_V4=$(curl -s https://api.ipify.org)
+			read -rp "公共 IPv4 地址或主机名: " -e -i "$PUBLIC_IP_V4" ENDPOINT_V4
+
+			if ! [[ "$ENDPOINT_V4" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! [[ "$ENDPOINT_V4" =~ .*:.* ]]; then
+				ENDPOINT_V6=$ENDPOINT_V4
+				echo "检测到主机名，将用于 IPv4 和 IPv6。"
+			else
+				PUBLIC_IP_V6=$(curl -s https://api64.ipify.org)
+				read -rp "公共 IPv6 地址 (如果可用): " -e -i "$PUBLIC_IP_V6" ENDPOINT_V6
+			fi
+		elif [[ $NETWORK_MODE == "1" ]]; then
+			PUBLICIP=$(curl -s https://api.ipify.org)
+			until [[ $ENDPOINT != "" ]]; do
+				read -rp "公共 IPv4 地址或主机名: " -e -i "$PUBLICIP" ENDPOINT
+			done
+		elif [[ $NETWORK_MODE == "2" ]]; then
+			PUBLICIP=$(curl -s -6 https://api64.ipify.org)
+			until [[ $ENDPOINT != "" ]]; do
+				read -rp "公共 IPv6 地址或主机名: " -e -i "$PUBLICIP" ENDPOINT
+			done
+		fi
+	fi
+
 	# 如果是仅 IPv6 模式，自动检测公共 IPv6 地址
-	if [[ $NETWORK_MODE == "2" ]]; then
+	if [[ $NETWORK_MODE == "2" && -z $ENDPOINT ]]; then
 		echo ""
 		echo "在仅 IPv6 模式下，正在自动检测公共 IPv6 地址..."
 		# 优先使用外部 API 检测，因为它能反映真实的外部 IP。依次尝试多个 API。
@@ -362,7 +364,7 @@ function installQuestions() {
 	echo "你希望 OpenVPN 使用哪种协议？"
 	echo "UDP 更快。除非不可用，否则不应使用 TCP。"
 	echo "   1) UDP"
-	echo "   2) TCP"
+		echo "   2) TCP"
 	until [[ $PROTOCOL_CHOICE =~ ^[1-2]$ ]]; do
 		read -rp "协议 [1-2]: " -e -i 1 PROTOCOL_CHOICE
 	done
@@ -705,6 +707,9 @@ function installOpenVPN() {
 
 	# 首先运行设置问题，如果是自动安装则设置其他变量
 	installQuestions
+
+	# 确保 /etc/openvpn 目录存在
+	mkdir -p /etc/openvpn
 
 	# 如果是双栈模式，保存 IPv4 和 IPv6 端点
 	if [[ $NETWORK_MODE == "3" ]]; then
