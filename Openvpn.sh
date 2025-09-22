@@ -256,13 +256,25 @@ function installQuestions() {
 	# 如果 $IP 是私有 IP 地址，服务器必须在 NAT 后面
 	if echo "$IP" | grep -qE '^(10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.|192\.168)'; then
 		echo ""
-		echo "看起来这台服务器在 NAT 后面。它的公共 IPv4 地址或主机名是什么？"
-		echo "我们需要它让客户端连接到服务器。"
-
-		PUBLICIP=$(curl -s https://api.ipify.org)
-		until [[ $ENDPOINT != "" ]]; do
-			read -rp "公共 IPv4 地址或主机名: " -e -i "$PUBLICIP" ENDPOINT
-		done
+		echo "看起来这台服务器在 NAT 后面。我们需要它的公共地址或主机名。"
+		
+		if [[ $NETWORK_MODE == "3" ]]; then
+			PUBLIC_IP_V4=$(curl -s https://api.ipify.org)
+			read -rp "公共 IPv4 地址或主机名: " -e -i "$PUBLIC_IP_V4" ENDPOINT_V4
+			
+			if ! [[ "$ENDPOINT_V4" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! [[ "$ENDPOINT_V4" =~ .*:.* ]]; then
+				ENDPOINT_V6=$ENDPOINT_V4
+				echo "检测到主机名，将用于 IPv4 和 IPv6。"
+			else
+				PUBLIC_IP_V6=$(curl -s https://api64.ipify.org)
+				read -rp "公共 IPv6 地址 (如果可用): " -e -i "$PUBLIC_IP_V6" ENDPOINT_V6
+			fi
+		else
+			PUBLICIP=$(curl -s https://api.ipify.org)
+			until [[ $ENDPOINT != "" ]]; do
+				read -rp "公共 IPv4 地址或主机名: " -e -i "$PUBLICIP" ENDPOINT
+			done
+		fi
 	fi
 
 	echo ""
@@ -694,6 +706,30 @@ function installOpenVPN() {
 	# 首先运行设置问题，如果是自动安装则设置其他变量
 	installQuestions
 
+	# 如果是双栈模式，保存 IPv4 和 IPv6 端点
+	if [[ $NETWORK_MODE == "3" ]]; then
+		if [[ -n "$ENDPOINT_V4" ]]; then
+			echo "$ENDPOINT_V4" > /etc/openvpn/endpoint_v4
+			IP=$ENDPOINT_V4 # 默认用于第一个客户端
+		else
+			# 不在 NAT 后面，自动检测
+			PUBLIC_IP_V4=$(ip -4 addr | sed -ne 's|^.* inet \([^/]*\)/.* scope global.*$|\1|p' | head -1)
+			if [[ -n "$PUBLIC_IP_V4" ]]; then
+				echo "$PUBLIC_IP_V4" > /etc/openvpn/endpoint_v4
+				IP=$PUBLIC_IP_V4
+			fi
+		fi
+		if [[ -n "$ENDPOINT_V6" ]]; then
+			echo "$ENDPOINT_V6" > /etc/openvpn/endpoint_v6
+		else
+			# 不在 NAT 后面，自动检测
+			PUBLIC_IP_V6=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
+			if [[ -n "$PUBLIC_IP_V6" ]]; then
+				echo "$PUBLIC_IP_V6" > /etc/openvpn/endpoint_v6
+			fi
+		fi
+	fi
+
 	# 从默认路由获取“公共”接口
 	NIC=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
 	if [[ -z $NIC ]] && [[ $IPV6_SUPPORT == 'y' ]]; then
@@ -761,6 +797,11 @@ function installOpenVPN() {
 	if [[ ! -d /etc/openvpn/easy-rsa/ ]]; then
 		local version="3.1.2"
 		wget -O ~/easy-rsa.tgz https://github.com/OpenVPN/easy-rsa/releases/download/v${version}/EasyRSA-${version}.tgz
+		# 添加下载验证
+		if [[ ! -f ~/easy-rsa.tgz ]]; then
+			echo "错误：无法下载 EasyRSA。请检查您的网络连接或稍后重试。"
+			exit 1
+		fi
 		mkdir -p /etc/openvpn/easy-rsa
 		tar xzf ~/easy-rsa.tgz --strip-components=1 --no-same-owner --directory /etc/openvpn/easy-rsa
 		rm -f ~/easy-rsa.tgz
@@ -1151,6 +1192,18 @@ verb 3" >>/etc/openvpn/client-template.txt
 }
 
 function newClient() {
+	CLIENT_PROTO_CHOICE=0
+	# Check if both endpoint files exist and are not empty
+	if [[ -s /etc/openvpn/endpoint_v4 && -s /etc/openvpn/endpoint_v6 ]]; then
+		echo ""
+		echo "服务器支持双栈。你想要哪种类型的客户端配置文件？"
+		echo "   1) IPv4"
+		echo "   2) IPv6"
+		until [[ $CLIENT_PROTO_CHOICE =~ ^[1-2]$ ]]; do
+			read -rp "客户端类型 [1-2]: " -e -i 1 CLIENT_PROTO_CHOICE
+		done
+	fi
+
 	echo ""
 	echo "告诉我客户端的名称。"
 	echo "名称必须由字母数字字符组成。它还可以包含下划线或破折号。"
@@ -1214,6 +1267,26 @@ function newClient() {
 
 	# 生成自定义的 client.ovpn
 	cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
+	local port
+	port=$(grep -oP '^port \K\d+' /etc/openvpn/server.conf)
+	if [[ $CLIENT_PROTO_CHOICE == "1" ]]; then # IPv4
+		local endpoint
+		endpoint=$(cat /etc/openvpn/endpoint_v4)
+		sed -i "s/^remote .*/remote $endpoint $port/" "$homeDir/$CLIENT.ovpn"
+		# Ensure proto is udp for IPv4 if server is udp
+		if grep -q "^proto udp" /etc/openvpn/server.conf; then
+			sed -i "s/^proto .*/proto udp/" "$homeDir/$CLIENT.ovpn"
+		fi
+	elif [[ $CLIENT_PROTO_CHOICE == "2" ]]; then # IPv6
+		local endpoint
+		endpoint=$(cat /etc/openvpn/endpoint_v6)
+		sed -i "s/^remote .*/remote $endpoint $port/" "$homeDir/$CLIENT.ovpn"
+		# Ensure proto is udp6 for IPv6 if server is udp
+		if grep -q "^proto udp" /etc/openvpn/server.conf; then
+			sed -i "s/^proto .*/proto udp6/" "$homeDir/$CLIENT.ovpn"
+		fi
+	fi
+
 	{
 		echo "<ca>"
 		cat "/etc/openvpn/easy-rsa/pki/ca.crt"
