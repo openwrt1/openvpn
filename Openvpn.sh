@@ -686,18 +686,16 @@ function configureFirewall() {
 	echo "#!/bin/sh" >/etc/iptables/add-openvpn-rules.sh
 	if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
 		echo "iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
-iptables -I INPUT 1 -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
-iptables -I FORWARD 1 -i tun0 -o $NIC -m state --state RELATED,ESTABLISHED -j ACCEPT
-iptables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
-iptables -A FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/add-openvpn-rules.sh
+iptables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
+iptables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables -I FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/add-openvpn-rules.sh
 	fi
 
 	if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
 		echo "ip6tables -t nat -A POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
-ip6tables -I INPUT 1 -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
-ip6tables -I FORWARD 1 -i tun0 -o $NIC -m state --state RELATED,ESTABLISHED -j ACCEPT
-ip6tables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
-ip6tables -A FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/add-openvpn-rules.sh
+ip6tables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
+ip6tables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+ip6tables -I FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/add-openvpn-rules.sh
 	fi
 
 	# 删除规则的脚本
@@ -706,16 +704,14 @@ ip6tables -A FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/add-openvpn-rule
 	if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
 		echo "iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
 iptables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
-iptables -D FORWARD -i tun0 -o $NIC -m state --state RELATED,ESTABLISHED -j ACCEPT
-iptables -D FORWARD -i $NIC -o tun0 -j ACCEPT
+iptables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/rm-openvpn-rules.sh
 	fi
 
 	if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
 		echo "ip6tables -t nat -D POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
 ip6tables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
-ip6tables -D FORWARD -i tun0 -o $NIC -m state --state RELATED,ESTABLISHED -j ACCEPT
-ip6tables -D FORWARD -i $NIC -o tun0 -j ACCEPT
+ip6tables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 ip6tables -D FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/rm-openvpn-rules.sh
 	fi
 
