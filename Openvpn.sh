@@ -707,7 +707,8 @@ COMMIT\n\
 		# 如果支持 IPv6，也添加 IPv6 的 NAT 规则
 		if [[ $IPV6_SUPPORT == 'y' ]] && ! grep -q "fd42:42:42:42::/112" /etc/ufw/before.rules; then
 			echo "正在为 UFW 添加 IPv6 NAT 规则..."
-			sed -i '/-A POSTROUTING -s 10.8.0.0\/24/a -A POSTROUTING -s fd42:42:42:42::/112 -o '"$NIC"' -j MASQUERADE' /etc/ufw/before.rules
+			# 修正 UFW 的 IPv6 NAT 规则，使其与 ip6tables 兼容
+			sed -i "/-A POSTROUTING -s 10.8.0.0\/24/a -A POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE" /etc/ufw/before.rules
 		fi
 
 		# 重载 UFW 以应用更改
@@ -1371,6 +1372,54 @@ function newClient() {
 	exit 0
 }
 
+function generateClientOvpnFile() {
+	local CLIENT="$1"
+	# 用户的主目录，将写入客户端配置文件
+	if [ -e "/home/${CLIENT}" ]; then
+		# 如果 $1 是用户名
+		homeDir="/home/${CLIENT}"
+	elif [ "${SUDO_USER}" ]; then
+		# 如果不是，使用 SUDO_USER
+		if [ "${SUDO_USER}" == "root" ]; then
+			# 如果以 root 身份运行 sudo
+			homeDir="/root"
+		else
+			homeDir="/home/${SUDO_USER}"
+		fi
+	else
+		# 如果不是 SUDO_USER，使用 /root
+		homeDir="/root"
+	fi
+
+	# 确定我们使用的是 tls-auth 还是 tls-crypt
+	if grep -qs "^tls-crypt" /etc/openvpn/server.conf; then
+		TLS_SIG="1"
+	elif grep -qs "^tls-auth" /etc/openvpn/server.conf; then
+		TLS_SIG="2"
+	fi
+
+	# 生成自定义的 client.ovpn
+	cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
+
+	{
+		echo "<ca>"
+		cat "/etc/openvpn/easy-rsa/pki/ca.crt"
+		echo "</ca>"
+		echo "<cert>"
+		awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
+		echo "</cert>"
+		echo "<key>"
+		cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
+		echo "</key>"
+		[[ "$TLS_SIG" == "1" ]] && { echo "<tls-crypt>"; cat /etc/openvpn/tls-crypt.key; echo "</tls-crypt>"; }
+		[[ "$TLS_SIG" == "2" ]] && { echo "key-direction 1"; echo "<tls-auth>"; cat /etc/openvpn/tls-auth.key; echo "</tls-auth>"; }
+	} >>"$homeDir/$CLIENT.ovpn"
+
+	echo ""
+	echo "配置文件已成功生成/重新生成于: $homeDir/$CLIENT.ovpn"
+	echo "下载 .ovpn 文件并将其导入你的 OpenVPN 客户端。"
+}
+
 function listClients() {
 	NUMBEROFCLIENTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c "^V")
 	if [[ $NUMBEROFCLIENTS == '0' ]]; then
@@ -1406,8 +1455,8 @@ function regenerateClient() {
 	if [[ $CLIENTEXISTS == '1' ]]; then
 		# 客户端存在，直接生成配置文件
 		echo "为客户端 $CLIENT 重新生成配置文件..."
-		# 调用 newClient 的后半部分来生成文件
-		generateClientConfig "$CLIENT"
+		# 调用重构后的函数来生成文件
+		generateClientOvpnFile "$CLIENT"
 	else
 		echo ""
 		echo "错误：客户端 $CLIENT 不存在。"
