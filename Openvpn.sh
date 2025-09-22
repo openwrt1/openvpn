@@ -941,12 +941,7 @@ function installOpenVPN() {
 	# 生成 server.conf
 	echo "port $PORT" >/etc/openvpn/server.conf
 
-	# 根据网络模式调整协议和服务器绑定
-	if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
-		echo "proto ${PROTOCOL}6" >>/etc/openvpn/server.conf
-	else # 仅 IPv4 或双栈
-		echo "proto $PROTOCOL" >>/etc/openvpn/server.conf
-	fi
+	echo "proto $PROTOCOL" >>/etc/openvpn/server.conf
 
 	echo "dev tun
 user nobody
@@ -1165,10 +1160,7 @@ verb 3" >>/etc/openvpn/server.conf
 
 	# client-template.txt 被创建，以便以后可以添加更多用户
 	echo "client" >/etc/openvpn/client-template.txt
-	if [[ $PROTOCOL == 'udp' ]]; then
-		if [[ $NETWORK_MODE == "2" ]]; then echo "proto udp6"; else echo "proto udp"; fi >>/etc/openvpn/client-template.txt
-		echo "explicit-exit-notify" >>/etc/openvpn/client-template.txt
-	elif [[ $PROTOCOL == 'tcp' ]]; then
+	if [[ $PROTOCOL == 'tcp' ]]; then
 		echo "proto tcp-client" >>/etc/openvpn/client-template.txt
 	fi
 	echo "remote $IP $PORT
@@ -1282,9 +1274,6 @@ function newClient() {
 		endpoint_v4=$(cat /etc/openvpn/endpoint_v4)
 		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv4.ovpn"
 		sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$homeDir/$CLIENT-ipv4.ovpn"
-		if grep -q "^proto udp" /etc/openvpn/server.conf; then
-			sed -i "s/^proto .*/proto udp/" "$homeDir/$CLIENT-ipv4.ovpn"
-		fi
 
 		{
 			echo "<ca>"
@@ -1319,9 +1308,6 @@ function newClient() {
 		endpoint_v6=$(cat /etc/openvpn/endpoint_v6)
 		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv6.ovpn"
 		sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$homeDir/$CLIENT-ipv6.ovpn"
-		if grep -q "^proto udp" /etc/openvpn/server.conf; then
-			sed -i "s/^proto .*/proto udp6/" "$homeDir/$CLIENT-ipv6.ovpn"
-		fi
 
 		{
 			echo "<ca>"
@@ -1353,6 +1339,10 @@ function newClient() {
 
 	if [[ $CLIENT_PROTO_CHOICE -eq 0 ]]; then # 服务器不是双栈
 		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
+		if [[ $PROTOCOL == 'udp' ]]; then
+			echo "proto udp" >> "$homeDir/$CLIENT.ovpn"
+			echo "explicit-exit-notify" >> "$homeDir/$CLIENT.ovpn"
+		fi
 		{
 			echo "<ca>"
 			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
@@ -1447,9 +1437,6 @@ function regenerateClient() {
 		endpoint_v4=$(cat /etc/openvpn/endpoint_v4)
 		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv4.ovpn"
 		sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$homeDir/$CLIENT-ipv4.ovpn"
-		if grep -q "^proto udp" /etc/openvpn/server.conf; then
-			sed -i "s/^proto .*/proto udp/" "$homeDir/$CLIENT-ipv4.ovpn"
-		fi
 
 		{
 			echo "<ca>"
@@ -1484,9 +1471,6 @@ function regenerateClient() {
 		endpoint_v6=$(cat /etc/openvpn/endpoint_v6)
 		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv6.ovpn"
 		sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$homeDir/$CLIENT-ipv6.ovpn"
-		if grep -q "^proto udp" /etc/openvpn/server.conf; then
-			sed -i "s/^proto .*/proto udp6/" "$homeDir/$CLIENT-ipv6.ovpn"
-		fi
 
 		{
 			echo "<ca>"
@@ -1518,6 +1502,10 @@ function regenerateClient() {
 
 	if [[ $CLIENT_PROTO_CHOICE -eq 0 ]]; then # 服务器不是双栈
 		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
+		if [[ $PROTOCOL == 'udp' ]]; then
+			echo "proto udp" >> "$homeDir/$CLIENT.ovpn"
+			echo "explicit-exit-notify" >> "$homeDir/$CLIENT.ovpn"
+		fi
 		{
 			echo "<ca>"
 			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
