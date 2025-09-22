@@ -240,10 +240,9 @@ function installQuestions() {
 	echo "你可以保留默认选项，并在确认时按回车键。"
 	echo ""
 
-	# 检测公共 IPv4 地址并预填充
+	# 检测公共 IPv4 和 IPv6 地址
 	IP=$(ip -4 addr | sed -ne 's|^.* inet \([^/]*\)/.* scope global.*$|\1|p' | head -1)
 	if [[ -z $IP ]]; then
-		# 检测公共 IPv6 地址
 		IP=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
 	fi
 
@@ -261,7 +260,7 @@ function installQuestions() {
 		echo "你的主机似乎没有 IPv6 连接。"
 		SUGGESTION="n"
 	fi
-	# 无论是否可用，询问用户是否要启用 IPv6 支持。
+	
 	until [[ $IPV6_SUPPORT =~ (y|n) ]]; do
 		read -rp "你想启用 IPv6 支持（NAT）吗？[y/n]: " -e -i $SUGGESTION IPV6_SUPPORT
 	done
@@ -274,7 +273,7 @@ function installQuestions() {
 	until [[ $NETWORK_MODE =~ ^[1-3]$ ]]; do
 		read -rp "网络模式 [1-3]: " -e -i 1 NETWORK_MODE
 	done
-
+	
 	echo ""
 	echo "我需要知道你希望 OpenVPN 监听的网络接口的 IP 地址。"
 	APPROVE_IP=${APPROVE_IP:-n}
