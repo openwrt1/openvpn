@@ -1326,6 +1326,50 @@ function newClient() {
 	exit 0
 }
 
+function listClients() {
+	NUMBEROFCLIENTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c "^V")
+	if [[ $NUMBEROFCLIENTS == '0' ]]; then
+		echo ""
+		echo "您还没有任何客户端！"
+		return 1
+	fi
+
+	echo ""
+	echo "已有的客户端列表:"
+	tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep "^V" | cut -d '=' -f 2 | nl -s ') '
+	return 0
+}
+
+function regenerateClient() {
+	if ! listClients; then
+		return
+	fi
+
+	NUMBEROFCLIENTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c "^V")
+	until [[ $CLIENTNUMBER -ge 1 && $CLIENTNUMBER -le $NUMBEROFCLIENTS ]]; do
+		read -rp "选择一个客户端以重新生成配置 [1-$NUMBEROFCLIENTS]: " CLIENTNUMBER
+	done
+
+	CLIENT=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep "^V" | cut -d '=' -f 2 | sed -n "$CLIENTNUMBER"p)
+	
+	# 设置 PASS=1 以跳过密码提示，因为我们只是重新生成文件
+	PASS=1
+	
+	# 检查客户端是否存在，然后调用 newClient 的核心逻辑来生成文件
+	# 我们需要绕过 newClient 开头的 exit 检查
+	CLIENTEXISTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c -E "/CN=$CLIENT\$")
+	if [[ $CLIENTEXISTS == '1' ]]; then
+		# 客户端存在，直接生成配置文件
+		echo "为客户端 $CLIENT 重新生成配置文件..."
+		# 调用 newClient 的后半部分来生成文件
+		generateClientConfig "$CLIENT"
+	else
+		echo ""
+		echo "错误：客户端 $CLIENT 不存在。"
+		exit 1
+	fi
+}
+
 function revokeClient() {
 	NUMBEROFCLIENTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c "^V")
 	if [[ $NUMBEROFCLIENTS == '0' ]]; then
@@ -1498,31 +1542,51 @@ function manageMenu() {
 	echo "欢迎使用 OpenVPN-install！"
 	echo "Git 仓库地址：https://github.com/angristan/openvpn-install"
 	echo ""
-	echo "看起来 OpenVPN 已经安装。"
-	echo ""
-	echo "你想做什么？"
-	echo "   1) 添加新用户"
-	echo "   2) 吊销现有用户"
-	echo "   3) 移除 OpenVPN"
-	echo "   4) 退出"
-	until [[ $MENU_OPTION =~ ^[1-4]$ ]]; do
-		read -rp "选择一个选项 [1-4]: " MENU_OPTION
-	done
+	
+	if [[ -e /etc/openvpn/server.conf && $AUTO_INSTALL != "y" ]]; then
+		echo "看起来 OpenVPN 已经安装。"
+		echo ""
+		echo "你想做什么？"
+		echo "   1) 添加新用户"
+		echo "   2) 吊销现有用户"
+		echo "   3) 重新生成客户端配置"
+		echo "   4) 卸载 OpenVPN"
+		echo "   5) 退出"
+		until [[ $MENU_OPTION =~ ^[1-5]$ ]]; do
+			read -rp "选择一个选项 [1-5]: " MENU_OPTION
+		done
 
-	case $MENU_OPTION in
-	1)
-		newClient
-		;;
-	2)
-		revokeClient
-		;;
-	3)
-		removeOpenVPN
-		;;
-	4)
-		exit 0
-		;;
-	esac
+		case $MENU_OPTION in
+		1)
+			newClient
+			;;
+		2)
+			revokeClient
+			;;
+		3)
+			regenerateClient
+			;;
+		4)
+			removeOpenVPN
+			;;
+		5)
+			exit 0
+			;;
+		esac
+	else
+		echo "请选择您要执行的操作："
+		echo "   1) 安装 OpenVPN"
+		echo "   2) 卸载 OpenVPN"
+		echo "   3) 退出"
+		until [[ $MENU_OPTION =~ ^[1-3]$ ]]; do
+			read -rp "选择一个选项 [1-3]: " MENU_OPTION
+		done
+		case $MENU_OPTION in
+			1) installOpenVPN ;;
+			2) removeOpenVPN ;;
+			3) exit 0 ;;
+		esac
+	fi
 }
 
 # 检查 root、TUN、OS...
@@ -1530,7 +1594,7 @@ initialCheck
 
 # 检查 OpenVPN 是否已经安装
 if [[ -e /etc/openvpn/server.conf && $AUTO_INSTALL != "y" ]]; then
-	manageMenu
+	manageMenu # 如果已安装，显示管理菜单
 else
-	installOpenVPN
+	manageMenu # 如果未安装，显示安装/卸载菜单
 fi
