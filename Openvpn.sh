@@ -1228,6 +1228,14 @@ function newClient() {
                 homeDir="/root"
         fi
 
+        # 获取国家代码用于文件名
+        local country
+        # 优先使用 endpoint_v4 的 IP 来查询地理位置
+        local query_ip
+        query_ip=$(cat /etc/openvpn/endpoint_v4 2>/dev/null || cat /etc/openvpn/endpoint_v6 2>/dev/null)
+        country=$(curl -s "http://ip-api.com/line/${query_ip}?fields=countryCode" | head -n 1)
+        [[ -z "$country" ]] && country="OVPN" # 如果查询失败，使用默认前缀
+
         # 确定我们使用的是 tls-auth 还是 tls-crypt
         if grep -qs "^tls-crypt" /etc/openvpn/server.conf; then
                 TLS_SIG="1"
@@ -1242,7 +1250,7 @@ function newClient() {
         if [[ $CLIENT_PROTO_CHOICE == "1" ]]; then # 仅 IPv4
                 local endpoint_v4
                 endpoint_v4=$(cat /etc/openvpn/endpoint_v4)
-                local client_config_path="$homeDir/$CLIENT-ipv4.ovpn"
+                local client_config_path="$homeDir/${country}[$CLIENT]-ipv4.ovpn"
                 cp /etc/openvpn/client-template.txt "$client_config_path"
 
                 # 为 IPv4 客户端设置正确的 proto
@@ -1282,16 +1290,16 @@ function newClient() {
                                 cat /etc/openvpn/tls-auth.key
                                 echo "</tls-auth>"
                                 ;;
-                        esac # 修复：将 'lz0' 改为正确的 'lzo'
+                        esac
                 } >>"$client_config_path"
                 echo ""
-                echo "IPv4 配置文件已写入 $homeDir/$CLIENT-ipv4.ovpn。"
+                echo "IPv4 配置文件已写入 $client_config_path。"
         fi
 
         if [[ $CLIENT_PROTO_CHOICE == "2" ]]; then # 仅 IPv6
                 local endpoint_v6
                 endpoint_v6=$(cat /etc/openvpn/endpoint_v6) # 修复：将 'lz0' 改为正确的 'lzo'
-                local client_config_path="$homeDir/$CLIENT-ipv6.ovpn"
+                local client_config_path="$homeDir/${country}[$CLIENT]-ipv6.ovpn"
                 cp /etc/openvpn/client-template.txt "$client_config_path"
 
                 # 为 IPv6 客户端设置正确的 proto
@@ -1331,17 +1339,18 @@ function newClient() {
                                 cat /etc/openvpn/tls-auth.key
                                 echo "</tls-auth>"
                                 ;;
-                        esac # 修复：将 'lz0' 改为正确的 'lzo'
+                        esac
                 } >>"$client_config_path"
                 echo ""
-                echo "IPv6 配置文件已写入 $homeDir/$CLIENT-ipv6.ovpn。"
+                echo "IPv6 配置文件已写入 $client_config_path。"
         fi
 
         if [[ $CLIENT_PROTO_CHOICE -eq 0 ]]; then # 服务器不是双栈
-                cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
+                local client_config_path="$homeDir/${country}[$CLIENT].ovpn"
+                cp /etc/openvpn/client-template.txt "$client_config_path"
                 if [[ $PROTOCOL == 'udp' ]]; then
-                        echo "proto udp" >> "$homeDir/$CLIENT.ovpn"
-                        echo "explicit-exit-notify" >> "$homeDir/$CLIENT.ovpn"
+                        echo "proto udp" >> "$client_config_path"
+                        echo "explicit-exit-notify" >> "$client_config_path"
                 fi
                 {
                         echo "<ca>"
@@ -1366,9 +1375,9 @@ function newClient() {
                                 echo "</tls-auth>"
                                 ;;
                         esac
-                } >>"$homeDir/$CLIENT.ovpn"
+                } >>"$client_config_path"
                 echo ""
-                echo "配置文件已写入 $homeDir/$CLIENT.ovpn。"
+                echo "配置文件已写入 $client_config_path。"
         fi
 
         echo "下载 .ovpn 文件并将其导入你的 OpenVPN 客户端。"
@@ -1541,8 +1550,8 @@ function regenerateClient() {
                 local client_config_path="$homeDir/${country}[$CLIENT].ovpn"
                 cp /etc/openvpn/client-template.txt "$client_config_path"
                 if [[ $PROTOCOL == 'udp' ]]; then
-                        echo "proto udp" >> "$homeDir/$CLIENT.ovpn"
-                        echo "explicit-exit-notify" >> "$homeDir/$CLIENT.ovpn"
+                        echo "proto udp" >> "$client_config_path"
+                        echo "explicit-exit-notify" >> "$client_config_path"
                 fi
                 {
                         echo "<ca>"
