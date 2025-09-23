@@ -949,10 +949,12 @@ function installOpenVPN() {
 	# 生成 server.conf
 	{
 		echo "port $PORT"
-		if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
-			echo "proto ${PROTOCOL}6"
-		else # 仅 IPv4 或双栈
+		if [[ $NETWORK_MODE == "1" ]]; then # 仅 IPv4
 			echo "proto ${PROTOCOL}4"
+		elif [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
+			echo "proto ${PROTOCOL}6"
+		else # 双栈
+			echo "proto $PROTOCOL"
 		fi
 		echo "dev tun
 user nobody
