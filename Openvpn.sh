@@ -1605,15 +1605,23 @@ function removeUnbound() {
 
 function removeFirewallRules() {
 	# 使用传统的 iptables 方法
+
+	# 首先，显式执行移除规则的脚本，确保规则被清除
+	if [[ -f /etc/iptables/rm-openvpn-rules.sh ]]; then
+		/etc/iptables/rm-openvpn-rules.sh
+	fi
+
 	if [[ "$OS" == "alpine" ]]; then
 		rc-service iptables-openvpn stop
 		rc-update del iptables-openvpn default
 		rm /etc/init.d/iptables-openvpn
 	else
+		# 然后，停止并禁用 systemd 服务
 		systemctl stop iptables-openvpn
 		systemctl disable iptables-openvpn
 		rm /etc/systemd/system/iptables-openvpn.service
 	fi
+	# 最后，删除 iptables 脚本目录
 	rm -rf /etc/iptables
 }
 
