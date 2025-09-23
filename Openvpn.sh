@@ -359,6 +359,14 @@ function installQuestions() {
 		echo "随机端口: $PORT"
 		;;
 	esac
+
+	if [[ $NETWORK_MODE == "3" ]]; then
+		echo ""
+		echo "对于双栈模式，请为 IPv6 连接指定一个不同的端口。"
+		# shellcheck disable=SC2153
+		read -rp "IPv6 端口 [1-65535]: " -e -i "1195" PORT_V6
+	fi
+
 	echo ""
 	echo "你希望 OpenVPN 使用哪种协议？"
 	echo "UDP 更快。除非不可用，否则不应使用 TCP。"
@@ -683,43 +691,56 @@ function configureFirewall() {
 	mkdir -p /etc/iptables
 
 	# 添加规则的脚本
-	echo "#!/bin/sh" >/etc/iptables/add-openvpn-rules.sh
-	# 检查 server.conf 是否包含 IPv4 server 指令，如果包含则添加 IPv4 规则
-	if grep -q "^server\s*10\.8\.0\.0" /etc/openvpn/server.conf; then
-		echo "iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
-iptables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
-iptables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
-iptables -I FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/add-openvpn-rules.sh
-	fi
+	{
+		echo "#!/bin/sh"
+		# 如果 server-ipv4.conf 存在或不是仅 IPv6 模式，则添加 IPv4 规则
+		if [[ -e /etc/openvpn/server-ipv4.conf || $NETWORK_MODE != "2" ]]; then
+			echo "iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE"
+			echo "iptables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT"
+			if [[ $NETWORK_MODE == "3" ]]; then
+				# 为双栈的 IPv6 实例端口也添加入站规则
+				echo "iptables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
+			fi
+			echo "iptables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT"
+			echo "iptables -I FORWARD -i tun0 -o $NIC -j ACCEPT"
+		fi
 
-	# 检查 server.conf 是否包含 IPv6 server 指令，如果包含则添加 IPv6 规则
-	# 或者，如果启用了 IPv6 支持，也应该添加规则
-	if grep -q "^server-ipv6" /etc/openvpn/server.conf || [[ $IPV6_SUPPORT == 'y' ]]; then
-		echo "ip6tables -t nat -A POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
-ip6tables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
-ip6tables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
-ip6tables -I FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/add-openvpn-rules.sh
-	fi
+		# 如果 server-ipv6.conf 存在或是仅 IPv6/双栈模式，则添加 IPv6 规则
+		if [[ -e /etc/openvpn/server-ipv6.conf || $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then
+			echo "ip6tables -t nat -A POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE"
+			echo "ip6tables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT"
+			if [[ $NETWORK_MODE == "3" ]]; then
+				# 为双栈的 IPv6 实例端口也添加入站规则
+				echo "ip6tables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
+			fi
+			echo "ip6tables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT"
+			echo "ip6tables -I FORWARD -i tun0 -o $NIC -j ACCEPT"
+		fi
+	} >/etc/iptables/add-openvpn-rules.sh
 
 	# 删除规则的脚本
-	echo "#!/bin/sh" >/etc/iptables/rm-openvpn-rules.sh
+	{
+		echo "#!/bin/sh"
+		if [[ -e /etc/openvpn/server-ipv4.conf || $NETWORK_MODE != "2" ]]; then
+			echo "iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE"
+			echo "iptables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT"
+			if [[ $NETWORK_MODE == "3" ]]; then
+				echo "iptables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
+			fi
+			echo "iptables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT"
+			echo "iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT"
+		fi
 
-	# 检查 server.conf 是否包含 IPv4 server 指令，如果包含则添加 IPv4 移除规则
-	if grep -q "^server\s*10\.8\.0\.0" /etc/openvpn/server.conf; then
-		echo "iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
-iptables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
-iptables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
-iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/rm-openvpn-rules.sh
-	fi
-
-	# 检查 server.conf 是否包含 IPv6 server 指令，如果包含则添加 IPv6 移除规则
-	# 或者，如果启用了 IPv6 支持，也应该添加规则
-	if grep -q "^server-ipv6" /etc/openvpn/server.conf || [[ $IPV6_SUPPORT == 'y' ]]; then
-		echo "ip6tables -t nat -D POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
-ip6tables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
-ip6tables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
-ip6tables -D FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/rm-openvpn-rules.sh
-	fi
+		if [[ -e /etc/openvpn/server-ipv6.conf || $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then
+			echo "ip6tables -t nat -D POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE"
+			echo "ip6tables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT"
+			if [[ $NETWORK_MODE == "3" ]]; then
+				echo "ip6tables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
+			fi
+			echo "ip6tables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT"
+			echo "ip6tables -D FORWARD -i tun0 -o $NIC -j ACCEPT"
+		fi
+	} >/etc/iptables/rm-openvpn-rules.sh
 
 	chmod +x /etc/iptables/add-openvpn-rules.sh
 	chmod +x /etc/iptables/rm-openvpn-rules.sh
@@ -737,7 +758,8 @@ EOF
 		rc-update add iptables-openvpn default
 		rc-service iptables-openvpn start
 	else
-		echo "[Unit]
+		cat >/etc/systemd/system/iptables-openvpn.service <<EOF
+[Unit]
 Description=iptables rules for OpenVPN
 Before=network-online.target
 Wants=network-online.target
@@ -749,8 +771,8 @@ ExecStop=/etc/iptables/rm-openvpn-rules.sh
 RemainAfterExit=yes
 
 [Install]
-WantedBy=multi-user.target" >/etc/systemd/system/iptables-openvpn.service
-
+WantedBy=multi-user.target
+EOF
 		# 启用服务并应用规则
 		systemctl daemon-reload
 		systemctl enable iptables-openvpn
@@ -836,7 +858,7 @@ function installOpenVPN() {
 	fi
 
 	# 如果 OpenVPN 尚未安装，则安装它。此脚本在多次运行时大致幂等，但仅在第一次时从上游安装 OpenVPN。
-	if [[ ! -e /etc/openvpn/server.conf ]]; then
+	if [[ ! -e /etc/openvpn/server.conf && ! -e /etc/openvpn/server-ipv4.conf ]]; then
 		if [[ $OS =~ (debian|ubuntu) ]]; then
 			apt-get update
 			apt-get -y install ca-certificates gnupg
@@ -946,128 +968,85 @@ function installOpenVPN() {
 	# 使证书吊销列表对非 root 用户可读
 	chmod 644 /etc/openvpn/crl.pem
 
-	# 生成 server.conf
-	{
-		echo "port $PORT"
-		if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
-			echo "proto ${PROTOCOL}6"
-		else # 仅 IPv4 或双栈
-			echo "proto ${PROTOCOL}4"
-		fi
-		echo "dev tun
+	# 生成通用配置部分
+	read -r -d '' COMMON_CONFIG << EOM
+dev tun
 user nobody
 group $NOGROUP
 persist-key
 persist-tun
-keepalive 10 120"
-		echo "tun-mtu 1280
-mssfix 1280"
-		# 即使在仅 IPv6 模式下，也需要 server 指令来定义拓扑结构
-		if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4, 仅 IPv6, 或双栈
-			echo "topology subnet
+keepalive 10 120
+tun-mtu 1280
+mssfix 1280
+topology subnet
 server 10.8.0.0 255.255.255.0
-ifconfig-pool-persist ipp.txt"
+ifconfig-pool-persist ipp.txt
+EOM
+
+	# 生成 DNS 配置部分
+	DNS_CONFIG=""
+	case $DNS in
+	1) # 当前系统解析器
+		# 定位正确的 resolv.conf
+		# 对于运行 systemd-resolved 的系统是必须的
+		if grep -q "127.0.0.53" "/etc/resolv.conf"; then
+			RESOLVCONF='/run/systemd/resolve/resolv.conf'
+		else
+			RESOLVCONF='/etc/resolv.conf'
 		fi
-		# DNS 解析器
-		case $DNS in
-		1) # 当前系统解析器
-			# 定位正确的 resolv.conf
-			# 对于运行 systemd-resolved 的系统是必须的
-			if grep -q "127.0.0.53" "/etc/resolv.conf"; then
-				RESOLVCONF='/run/systemd/resolve/resolv.conf'
-			else
-				RESOLVCONF='/etc/resolv.conf'
+		# 从 resolv.conf 获取解析器并将它们用于 OpenVPN
+		sed -ne 's/^nameserver[[:space:]]\+\([^[:space:]]\+\).*$/\1/p' "$RESOLVCONF" | while read -r line; do
+			# 复制，无论是 IPv4 还是 IPv6
+			if [[ $line =~ ^[0-9.]*$ ]] || [[ $line =~ .*:.* ]]; then
+				DNS_CONFIG="${DNS_CONFIG}push \"dhcp-option DNS $line\"\n"
 			fi
-			# 从 resolv.conf 获取解析器并将它们用于 OpenVPN
-			sed -ne 's/^nameserver[[:space:]]\+\([^[:space:]]\+\).*$/\1/p' "$RESOLVCONF" | while read -r line; do
-				# 复制，如果是 IPv4 |或| 如果启用 IPv6，则 IPv4/IPv6 无关
-				if [[ $line =~ ^[0-9.]*$ ]] && [[ $NETWORK_MODE != "2" ]] || [[ $line =~ .*:.* ]] && [[ $NETWORK_MODE != "1" ]]; then
-					echo "push \"dhcp-option DNS $line\""
-				fi
-			done
-			;;
-		2) # 自托管 DNS 解析器（Unbound）
-			if [[ $NETWORK_MODE != "2" ]]; then echo 'push "dhcp-option DNS 10.8.0.1"'; fi
-			if [[ $IPV6_SUPPORT == 'y' ]]; then
-				echo 'push "dhcp-option DNS fd42:42:42:42::1"'
-			fi
-			;;
-		3) # Cloudflare
-			echo 'push "dhcp-option DNS 1.0.0.1"'
-			echo 'push "dhcp-option DNS 1.1.1.1"'
-			;;
-		4) # Quad9
-			echo 'push "dhcp-option DNS 9.9.9.9"'
-			echo 'push "dhcp-option DNS 149.112.112.112"'
-			;;
-		5) # Quad9 未过滤版
-			echo 'push "dhcp-option DNS 9.9.9.10"'
-			echo 'push "dhcp-option DNS 149.112.112.10"'
-			;;
-		6) # FDN
-			echo 'push "dhcp-option DNS 80.67.169.40"'
-			echo 'push "dhcp-option DNS 80.67.169.12"'
-			;;
-		7) # DNS.WATCH
-			echo 'push "dhcp-option DNS 84.200.69.80"'
-			echo 'push "dhcp-option DNS 84.200.70.40"'
-			;;
-		8) # OpenDNS
-			echo 'push "dhcp-option DNS 208.67.222.222"'
-			echo 'push "dhcp-option DNS 208.67.220.220"'
-			;;
-		9) # Google
-			echo 'push "dhcp-option DNS 8.8.8.8"'
-			echo 'push "dhcp-option DNS 8.8.4.4"'
-			;;
-		10) # Yandex Basic
-			echo 'push "dhcp-option DNS 77.88.8.8"'
-			echo 'push "dhcp-option DNS 77.88.8.1"'
-			;;
-		11) # AdGuard DNS
-			echo 'push "dhcp-option DNS 94.140.14.14"'
-			echo 'push "dhcp-option DNS 94.140.15.15"'
-			;;
-		12) # NextDNS
-			echo 'push "dhcp-option DNS 45.90.28.167"'
-			echo 'push "dhcp-option DNS 45.90.30.167"'
-			;;
-		13) # 自定义 DNS
-			echo "push \"dhcp-option DNS $DNS1\""
-			if [[ $DNS2 != "" ]]; then
-				echo "push \"dhcp-option DNS $DNS2\""
-			fi
-			;;
-		esac
-		if [[ $NETWORK_MODE != "2" ]]; then # 仅 IPv4 或双栈
-			echo 'push "redirect-gateway def1 bypass-dhcp"'
+		done
+		;;
+	2) # 自托管 DNS 解析器（Unbound）
+		DNS_CONFIG="push \"dhcp-option DNS 10.8.0.1\"\n"
+		DNS_CONFIG="${DNS_CONFIG}push \"dhcp-option DNS fd42:42:42:42::1\"\n"
+		;;
+	3) # Cloudflare
+		DNS_CONFIG="push \"dhcp-option DNS 1.0.0.1\"\npush \"dhcp-option DNS 1.1.1.1\"\n"
+		;;
+	4) # Quad9
+		DNS_CONFIG="push \"dhcp-option DNS 9.9.9.9\"\npush \"dhcp-option DNS 149.112.112.112\"\n"
+		;;
+	5) # Quad9 未过滤版
+		DNS_CONFIG="push \"dhcp-option DNS 9.9.9.10\"\npush \"dhcp-option DNS 149.112.112.10\"\n"
+		;;
+	6) # FDN
+		DNS_CONFIG="push \"dhcp-option DNS 80.67.169.40\"\npush \"dhcp-option DNS 80.67.169.12\"\n"
+		;;
+	7) # DNS.WATCH
+		DNS_CONFIG="push \"dhcp-option DNS 84.200.69.80\"\npush \"dhcp-option DNS 84.200.70.40\"\n"
+		;;
+	8) # OpenDNS
+		DNS_CONFIG="push \"dhcp-option DNS 208.67.222.222\"\npush \"dhcp-option DNS 208.67.220.220\"\n"
+		;;
+	9) # Google
+		DNS_CONFIG="push \"dhcp-option DNS 8.8.8.8\"\npush \"dhcp-option DNS 8.8.4.4\"\n"
+		;;
+	10) # Yandex Basic
+		DNS_CONFIG="push \"dhcp-option DNS 77.88.8.8\"\npush \"dhcp-option DNS 77.88.8.1\"\n"
+		;;
+	11) # AdGuard DNS
+		DNS_CONFIG="push \"dhcp-option DNS 94.140.14.14\"\npush \"dhcp-option DNS 94.140.15.15\"\n"
+		;;
+	12) # NextDNS
+		DNS_CONFIG="push \"dhcp-option DNS 45.90.28.167\"\npush \"dhcp-option DNS 45.90.30.167\"\n"
+		;;
+	13) # 自定义 DNS
+		DNS_CONFIG="push \"dhcp-option DNS $DNS1\"\n"
+		if [[ $DNS2 != "" ]]; then
+			DNS_CONFIG="${DNS_CONFIG}push \"dhcp-option DNS $DNS2\"\n"
 		fi
-		# 如果需要，IPv6 网络设置
-		if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
-			echo 'server-ipv6 fd42:42:42:42::/112
-tun-ipv6
-push tun-ipv6
-push "route-ipv6 2000::/3"
-push "redirect-gateway ipv6"'
-		fi
-		if [[ $COMPRESSION_ENABLED == "y" ]]; then
-			echo "compress $COMPRESSION_ALG"
-		fi
-		if [[ $DH_TYPE == "1" ]]; then
-			echo "dh none"
-			echo "ecdh-curve $DH_CURVE"
-		elif [[ $DH_TYPE == "2" ]]; then
-			echo "dh dh.pem"
-		fi
-		case $TLS_SIG in
-		1)
-			echo "tls-crypt tls-crypt.key"
-			;;
-		2)
-			echo "tls-auth tls-auth.key 0"
-			;;
-		esac
-		echo "crl-verify crl.pem
+		;;
+	esac
+
+	# 生成通用加密和证书配置
+	read -r -d '' CRYPTO_CONFIG << EOM
+crl-verify crl.pem
 ca ca.crt
 cert $SERVER_NAME.crt
 key $SERVER_NAME.key
@@ -1078,9 +1057,63 @@ tls-server
 tls-version-min 1.2
 tls-cipher $CC_CIPHER
 client-config-dir /etc/openvpn/ccd
-status /var/log/openvpn/status.log
-verb 3" >>/etc/openvpn/server.conf
-	} >/etc/openvpn/server.conf
+verb 3
+EOM
+
+	# 根据网络模式生成一个或两个配置文件
+	if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或 双栈 (IPv4 部分)
+		{
+			echo "port $PORT"
+			echo "proto ${PROTOCOL}4"
+			echo -e "$COMMON_CONFIG"
+			echo -e "$DNS_CONFIG"
+			echo 'push "redirect-gateway def1 bypass-dhcp"'
+			if [[ $NETWORK_MODE == "3" ]]; then # 双栈模式下也推送 IPv6
+				echo 'server-ipv6 fd42:42:42:42::/112
+tun-ipv6
+push tun-ipv6
+push "route-ipv6 2000::/3"
+push "redirect-gateway ipv6"'
+			fi
+			if [[ $COMPRESSION_ENABLED == "y" ]]; then echo "compress $COMPRESSION_ALG"; fi
+			if [[ $DH_TYPE == "1" ]]; then echo -e "dh none\necdh-curve $DH_CURVE"; elif [[ $DH_TYPE == "2" ]]; then echo "dh dh.pem"; fi
+			case $TLS_SIG in 1) echo "tls-crypt tls-crypt.key";; 2) echo "tls-auth tls-auth.key 0";; esac
+			echo -e "$CRYPTO_CONFIG"
+			echo "status /var/log/openvpn/status-ipv4.log"
+		} >/etc/openvpn/server-ipv4.conf
+	fi
+
+	if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或 双栈 (IPv6 部分)
+		local port_v6=$PORT
+		if [[ $NETWORK_MODE == "3" ]]; then
+			port_v6=$PORT_V6
+		fi
+		{
+			echo "port $port_v6"
+			echo "proto ${PROTOCOL}6"
+			echo -e "$COMMON_CONFIG"
+			echo -e "$DNS_CONFIG"
+			# 即使在仅 IPv6 连接模式下，隧道内也支持双栈，所以推送两个网关
+			echo 'push "redirect-gateway def1 bypass-dhcp"'
+			echo 'server-ipv6 fd42:42:42:42::/112
+tun-ipv6
+push tun-ipv6
+push "route-ipv6 2000::/3"
+push "redirect-gateway ipv6"'
+			if [[ $COMPRESSION_ENABLED == "y" ]]; then echo "compress $COMPRESSION_ALG"; fi
+			if [[ $DH_TYPE == "1" ]]; then echo -e "dh none\necdh-curve $DH_CURVE"; elif [[ $DH_TYPE == "2" ]]; then echo "dh dh.pem"; fi
+			case $TLS_SIG in 1) echo "tls-crypt tls-crypt.key";; 2) echo "tls-auth tls-auth.key 0";; esac
+			echo -e "$CRYPTO_CONFIG"
+			echo "status /var/log/openvpn/status-ipv6.log"
+		} >/etc/openvpn/server-ipv6.conf
+	fi
+
+	# 为了向后兼容和简化逻辑，为单协议模式创建 server.conf 符号链接
+	if [[ $NETWORK_MODE == "1" ]]; then
+		ln -sf /etc/openvpn/server-ipv4.conf /etc/openvpn/server.conf
+	elif [[ $NETWORK_MODE == "2" ]]; then
+		ln -sf /etc/openvpn/server-ipv6.conf /etc/openvpn/server.conf
+	fi
 
 	# 创建 client-config-dir 目录
 	mkdir -p /etc/openvpn/ccd
@@ -1088,13 +1121,8 @@ verb 3" >>/etc/openvpn/server.conf
 	mkdir -p /var/log/openvpn
 
 	# 启用路由
-	if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
-		echo 'net.ipv4.ip_forward=1' >/etc/sysctl.d/99-openvpn.conf
-	else # 仅 IPv6
-		# 创建一个空文件或只包含 IPv6 的文件
-		echo '# net.ipv4.ip_forward=1' >/etc/sysctl.d/99-openvpn.conf
-	fi
-	if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
+	echo 'net.ipv4.ip_forward=1' >/etc/sysctl.d/99-openvpn.conf
+	if [[ $IPV6_SUPPORT == 'y' ]]; then
 		echo 'net.ipv6.conf.all.forwarding=1' >>/etc/sysctl.d/99-openvpn.conf
 	fi
 	# 应用 sysctl 规则
@@ -1106,42 +1134,53 @@ verb 3" >>/etc/openvpn/server.conf
 			if [[ $PORT != '1194' ]]; then
 				semanage port -a -t openvpn_port_t -p "$PROTOCOL" "$PORT"
 			fi
+			if [[ $NETWORK_MODE == "3" && $PORT_V6 != '1194' ]]; then
+				semanage port -a -t openvpn_port_t -p "$PROTOCOL" "$PORT_V6"
+			fi
 		fi
 	fi
 
 	# 最后，重启并启用 OpenVPN
 	if [[ $OS == 'alpine' ]]; then
 		rc-update add openvpn default
-		rc-service openvpn restart
+		# Alpine 不支持多实例，这里简化处理
+		rc-service openvpn restart # 默认会使用 server.conf
 	elif [[ $OS == 'arch' || $OS == 'fedora' || $OS == 'centos' || $OS == 'oracle' ]]; then
 		# 不修改包提供的服务
 		cp /usr/lib/systemd/system/openvpn-server@.service /etc/systemd/system/openvpn-server@.service
-
 		# 修复 OpenVPN 服务在 OpenVZ 上的问题
 		sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn-server@.service
-		# 另一个继续使用 /etc/openvpn/ 的解决方法
 		sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn-server@.service
-
 		systemctl daemon-reload
-		systemctl enable openvpn-server@server
-		systemctl restart openvpn-server@server
+		if [[ $NETWORK_MODE == "3" ]]; then
+			systemctl enable openvpn-server@server-ipv4
+			systemctl restart openvpn-server@server-ipv4
+			systemctl enable openvpn-server@server-ipv6
+			systemctl restart openvpn-server@server-ipv6
+		else
+			systemctl enable openvpn-server@server
+			systemctl restart openvpn-server@server
+		fi
 	elif [[ $OS == "ubuntu" ]] && [[ $VERSION_ID == "16.04" ]]; then
-		# 在 Ubuntu 16.04 上，我们使用来自 OpenVPN 仓库的包
-		# 这个包使用一个 sysvinit 服务
+		# sysvinit 不支持多实例，简化处理
 		systemctl enable openvpn
 		systemctl start openvpn
 	else
 		# 不修改包提供的服务
 		cp /lib/systemd/system/openvpn\@.service /etc/systemd/system/openvpn\@.service
-
 		# 修复 OpenVPN 服务在 OpenVZ 上的问题
 		sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn\@.service
-		# 另一个继续使用 /etc/openvpn/ 的解决方法
 		sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn\@.service
-
 		systemctl daemon-reload
-		systemctl enable openvpn@server
-		systemctl restart openvpn@server
+		if [[ $NETWORK_MODE == "3" ]]; then
+			systemctl enable openvpn@server-ipv4
+			systemctl restart openvpn@server-ipv4
+			systemctl enable openvpn@server-ipv6
+			systemctl restart openvpn@server-ipv6
+		else
+			systemctl enable openvpn@server
+			systemctl restart openvpn@server
+		fi
 	fi
 
 	if [[ $DNS == 2 ]]; then
@@ -1151,10 +1190,11 @@ verb 3" >>/etc/openvpn/server.conf
 	# 调用新的防火墙配置函数
 	configureFirewall
 
-	# 如果服务器在 NAT 后，请使用正确的 IP 地址让客户端连接到服务器
-	if [[ $ENDPOINT != "" ]]; then
-		# 如果是仅 IPv6 模式，确保 ENDPOINT 是一个 IPv6 地址
+	# 为客户端模板设置默认 IP
+	if [[ $NETWORK_MODE == "1" ]]; then
 		IP=$ENDPOINT
+	elif [[ $NETWORK_MODE == "3" ]]; then
+		IP=$(cat /etc/openvpn/endpoint_v4) # 默认使用 IPv4
 	fi
 
 	# 关键修复：在仅 IPv6 模式下，强制使用检测到的公共 IPv6 地址
@@ -1167,15 +1207,17 @@ verb 3" >>/etc/openvpn/server.conf
 	fi
 
 	# client-template.txt 被创建，以便以后可以添加更多用户
-	echo "client" >/etc/openvpn/client-template.txt
-	if [[ $PROTOCOL == 'tcp' ]]; then
-		if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
-			echo "proto tcp6-client" >>/etc/openvpn/client-template.txt
-		else # 仅 IPv4 或双栈
-			echo "proto tcp4-client" >>/etc/openvpn/client-template.txt
+	# 在双栈模式下，此模板仅作为基础，具体 proto 和 remote 会在 newClient 中被覆盖
+	{
+		echo "client"
+		if [[ $PROTOCOL == 'tcp' ]]; then
+			# 默认使用 tcp4-client，在 newClient 中会按需修改
+			echo "proto tcp4-client"
+		else
+			# 默认使用 udp4，在 newClient 中会按需修改
+			echo "proto udp4"
 		fi
-	fi
-	echo "remote $IP $PORT
+		echo "remote $IP $PORT
 dev tun
 resolv-retry infinite
 nobind
@@ -1191,14 +1233,13 @@ tls-version-min 1.2
 tls-cipher $CC_CIPHER
 ignore-unknown-option block-outside-dns
 setenv opt block-outside-dns # 防止 Windows 10 DNS 泄漏
-verb 3" >>/etc/openvpn/client-template.txt
-
-	echo "tun-mtu 1280
-mssfix 1280" >>/etc/openvpn/client-template.txt
-
-	if [[ $COMPRESSION_ENABLED == "y" ]]; then
-		echo "compress $COMPRESSION_ALG" >>/etc/openvpn/client-template.txt
-	fi
+verb 3"
+		echo "tun-mtu 1280
+mssfix 1280"
+		if [[ $COMPRESSION_ENABLED == "y" ]]; then
+			echo "compress $COMPRESSION_ALG"
+		fi
+	} >/etc/openvpn/client-template.txt
 
 	# 生成自定义的 client.ovpn
 	newClient
@@ -1274,15 +1315,18 @@ function newClient() {
 	fi
 
 	# 确定我们使用的是 tls-auth 还是 tls-crypt
-	if grep -qs "^tls-crypt" /etc/openvpn/server.conf; then
+	if grep -qs "^tls-crypt" /etc/openvpn/server*.conf; then
 		TLS_SIG="1"
-	elif grep -qs "^tls-auth" /etc/openvpn/server.conf; then
+	elif grep -qs "^tls-auth" /etc/openvpn/server*.conf; then
 		TLS_SIG="2"
 	fi
 
 	# 根据选择生成一个或两个文件
-	local port
-	port=$(grep -oP '^port \K\d+' /etc/openvpn/server.conf)
+	local port_v4
+	local port_v6
+	# 从对应的配置文件中获取端口
+	[[ -e /etc/openvpn/server-ipv4.conf ]] && port_v4=$(grep -oP '^port \K\d+' /etc/openvpn/server-ipv4.conf)
+	[[ -e /etc/openvpn/server-ipv6.conf ]] && port_v6=$(grep -oP '^port \K\d+' /etc/openvpn/server-ipv6.conf)
 
 	if [[ $CLIENT_PROTO_CHOICE == "1" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv4 或 两者
 		local endpoint_v4
@@ -1298,12 +1342,8 @@ function newClient() {
 			sed -i "s/proto tcp[46]*-client/proto tcp4-client/" "$client_config_path"
 		fi
 
-		# 如果是 IPv6 地址，则添加括号
-		if echo "$endpoint_v4" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v4] $port/" "$client_config_path"
-		else
-			sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$client_config_path"
-		fi
+		# 设置正确的 remote
+		sed -i "s/^remote .*/remote $endpoint_v4 $port_v4/" "$client_config_path"
 
 		{
 			echo "<ca>"
@@ -1327,7 +1367,7 @@ function newClient() {
 				cat /etc/openvpn/tls-auth.key
 				echo "</tls-auth>"
 				;;
-			esac # 修复：将 'lz0' 改为正确的 'lzo'
+			esac
 		} >>"$client_config_path"
 		echo ""
 		echo "IPv4 配置文件已写入 $homeDir/$CLIENT-ipv4.ovpn。"
@@ -1335,7 +1375,7 @@ function newClient() {
 
 	if [[ $CLIENT_PROTO_CHOICE == "2" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv6 或 两者
 		local endpoint_v6
-		endpoint_v6=$(cat /etc/openvpn/endpoint_v6) # 修复：将 'lz0' 改为正确的 'lzo'
+		endpoint_v6=$(cat /etc/openvpn/endpoint_v6)
 		local client_config_path="$homeDir/$CLIENT-ipv6.ovpn"
 		cp /etc/openvpn/client-template.txt "$client_config_path"
 
@@ -1347,11 +1387,11 @@ function newClient() {
 			sed -i "s/proto tcp[46]*-client/proto tcp6-client/" "$client_config_path"
 		fi
 
-		# 如果是 IPv6 地址，则添加括号
+		# 设置正确的 remote，如果是 IPv6 地址，则添加括号
 		if echo "$endpoint_v6" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v6] $port/" "$client_config_path"
+			sed -i "s/^remote .*/remote [$endpoint_v6] $port_v6/" "$client_config_path"
 		else
-			sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$client_config_path"
+			sed -i "s/^remote .*/remote $endpoint_v6 $port_v6/" "$client_config_path"
 		fi
 
 		{
@@ -1376,16 +1416,30 @@ function newClient() {
 				cat /etc/openvpn/tls-auth.key
 				echo "</tls-auth>"
 				;;
-			esac # 修复：将 'lz0' 改为正确的 'lzo'
+			esac
 		} >>"$client_config_path"
 		echo ""
 		echo "IPv6 配置文件已写入 $homeDir/$CLIENT-ipv6.ovpn。"
 	fi
 
 	if [[ $CLIENT_PROTO_CHOICE -eq 0 ]]; then # 服务器不是双栈
+		local port
+		port=$(grep -oP '^port \K\d+' /etc/openvpn/server.conf)
 		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
+		# 确保 remote 行正确
+		if echo "$IP" | grep -q ':'; then
+			sed -i "s/^remote .*/remote [$IP] $port/" "$homeDir/$CLIENT.ovpn"
+		else
+			sed -i "s/^remote .*/remote $IP $port/" "$homeDir/$CLIENT.ovpn"
+		fi
+		# 确保 proto 行正确
+		sed -i '/^proto /d' "$homeDir/$CLIENT.ovpn"
+		if [[ $NETWORK_MODE == "2" ]]; then
+			echo "proto ${PROTOCOL}6" >> "$homeDir/$CLIENT.ovpn"
+		else
+			echo "proto ${PROTOCOL}4" >> "$homeDir/$CLIENT.ovpn"
+		fi
 		if [[ $PROTOCOL == 'udp' ]]; then
-			echo "proto udp" >> "$homeDir/$CLIENT.ovpn"
 			echo "explicit-exit-notify" >> "$homeDir/$CLIENT.ovpn"
 		fi
 		{
@@ -1420,6 +1474,19 @@ function newClient() {
 	exit 0
 }
 
+function listClients() {
+	NUMBEROFCLIENTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c "^V")
+	if [[ $NUMBEROFCLIENTS == '0' ]]; then
+		echo ""
+		echo "你没有现有的客户端！"
+		return 1
+	fi
+	echo ""
+	echo "现有客户端："
+	tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep "^V" | cut -d '=' -f 2 | nl -s ') '
+	return 0
+}
+
 function regenerateClient() {
 	if ! listClients; then
 		return
@@ -1440,189 +1507,16 @@ function regenerateClient() {
 	fi
 
 	echo "为客户端 $CLIENT 重新生成配置文件..."
-
-	CLIENT_PROTO_CHOICE=0
-	if [[ -s /etc/openvpn/endpoint_v4 && -s /etc/openvpn/endpoint_v6 ]]; then
-		echo ""
-		echo "服务器支持双栈。你想要哪种类型的客户端配置文件？"
-		echo "   1) IPv4"
-		echo "   2) IPv6"
-		echo "   3) 生成两个文件 (IPv4 和 IPv6)"
-		until [[ $CLIENT_PROTO_CHOICE =~ ^[1-3]$ ]]; do
-			read -rp "客户端类型 [1-3]: " -e -i 1 CLIENT_PROTO_CHOICE
-		done
-	fi
-
-	# 用户的主目录，将写入客户端配置文件
-	if [ -e "/home/${CLIENT}" ]; then
-		homeDir="/home/${CLIENT}"
-	elif [ "${SUDO_USER}" ]; then
-		if [ "${SUDO_USER}" == "root" ]; then
-			homeDir="/root"
-		else
-			homeDir="/home/${SUDO_USER}"
-		fi
-	else
-		homeDir="/root"
-	fi
-
-	# 确定我们使用的是 tls-auth 还是 tls-crypt
-	if grep -qs "^tls-crypt" /etc/openvpn/server.conf; then
-		TLS_SIG="1"
-	elif grep -qs "^tls-auth" /etc/openvpn/server.conf; then
-		TLS_SIG="2"
-	fi
-
-	# 根据选择生成一个或两个文件
-	local port
-	port=$(grep -oP '^port \K\d+' /etc/openvpn/server.conf)
-
-	if [[ $CLIENT_PROTO_CHOICE == "1" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv4 或 两者
-		local endpoint_v4
-		endpoint_v4=$(cat /etc/openvpn/endpoint_v4)
-		local client_config_path="$homeDir/$CLIENT-ipv4.ovpn"
-		cp /etc/openvpn/client-template.txt "$client_config_path"
-
-		# 为 IPv4 客户端设置正确的 proto
-		if [[ $PROTOCOL == 'udp' ]]; then
-			sed -i '/^proto /d' "$client_config_path" # 移除模板中的 proto 行
-			echo "proto udp4" >> "$client_config_path"
-		elif [[ $PROTOCOL == 'tcp' ]]; then
-			sed -i "s/proto tcp[46]*-client/proto tcp4-client/" "$client_config_path"
-		fi
-
-		# 如果是 IPv6 地址，则添加括号
-		if echo "$endpoint_v4" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v4] $port/" "$client_config_path"
-		else
-			sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$client_config_path"
-		fi
-
-		{
-			echo "<ca>"
-			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
-			echo "</ca>"
-			echo "<cert>"
-			awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
-			echo "</cert>"
-			echo "<key>"
-			cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
-			echo "</key>"
-			case $TLS_SIG in
-			1)
-				echo "<tls-crypt>"
-				cat /etc/openvpn/tls-crypt.key
-				echo "</tls-crypt>"
-				;;
-			2)
-				echo "key-direction 1"
-				echo "<tls-auth>"
-				cat /etc/openvpn/tls-auth.key
-				echo "</tls-auth>"
-				;;
-			esac # 修复：将 'lz0' 改为正确的 'lzo'
-		} >>"$client_config_path"
-		echo ""
-		echo "IPv4 配置文件已重新生成于 $homeDir/$CLIENT-ipv4.ovpn。"
-	fi
-
-	if [[ $CLIENT_PROTO_CHOICE == "2" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv6 或 两者
-		local endpoint_v6
-		endpoint_v6=$(cat /etc/openvpn/endpoint_v6) # 修复：将 'lz0' 改为正确的 'lzo'
-		local client_config_path="$homeDir/$CLIENT-ipv6.ovpn"
-		cp /etc/openvpn/client-template.txt "$client_config_path"
-
-		# 为 IPv6 客户端设置正确的 proto
-		if [[ $PROTOCOL == 'udp' ]]; then
-			sed -i '/^proto /d' "$client_config_path" # 移除模板中的 proto 行
-			echo "proto udp6" >> "$client_config_path"
-		elif [[ $PROTOCOL == 'tcp' ]]; then
-			sed -i "s/proto tcp[46]*-client/proto tcp6-client/" "$client_config_path"
-		fi
-
-		# 如果是 IPv6 地址，则添加括号
-		if echo "$endpoint_v6" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v6] $port/" "$client_config_path"
-		else
-			sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$client_config_path"
-		fi
-
-		{
-			echo "<ca>"
-			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
-			echo "</ca>"
-			echo "<cert>"
-			awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
-			echo "</cert>"
-			echo "<key>"
-			cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
-			echo "</key>"
-			case $TLS_SIG in
-			1)
-				echo "<tls-crypt>"
-				cat /etc/openvpn/tls-crypt.key
-				echo "</tls-crypt>"
-				;;
-			2)
-				echo "key-direction 1"
-				echo "<tls-auth>"
-				cat /etc/openvpn/tls-auth.key
-				echo "</tls-auth>"
-				;;
-			esac # 修复：将 'lz0' 改为正确的 'lzo'
-		} >>"$client_config_path"
-		echo ""
-		echo "IPv6 配置文件已重新生成于 $homeDir/$CLIENT-ipv6.ovpn。"
-	fi
-
-	if [[ $CLIENT_PROTO_CHOICE -eq 0 ]]; then # 服务器不是双栈
-		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT.ovpn"
-		if [[ $PROTOCOL == 'udp' ]]; then
-			echo "proto udp" >> "$homeDir/$CLIENT.ovpn"
-			echo "explicit-exit-notify" >> "$homeDir/$CLIENT.ovpn"
-		fi
-		{
-			echo "<ca>"
-			cat "/etc/openvpn/easy-rsa/pki/ca.crt"
-			echo "</ca>"
-			echo "<cert>"
-			awk '/BEGIN/,/END CERTIFICATE/' "/etc/openvpn/easy-rsa/pki/issued/$CLIENT.crt"
-			echo "</cert>"
-			echo "<key>"
-			cat "/etc/openvpn/easy-rsa/pki/private/$CLIENT.key"
-			echo "</key>"
-			case $TLS_SIG in
-			1)
-				echo "<tls-crypt>"
-				cat /etc/openvpn/tls-crypt.key
-				echo "</tls-crypt>"
-				;;
-			2)
-				echo "key-direction 1"
-				echo "<tls-auth>"
-				cat /etc/openvpn/tls-auth.key
-				echo "</tls-auth>"
-				;;
-			esac
-		} >>"$homeDir/$CLIENT.ovpn"
-		echo ""
-		echo "配置文件已重新生成于 $homeDir/$CLIENT.ovpn。"
-	fi
-
-	echo "下载 .ovpn 文件并将其导入你的 OpenVPN 客户端。"
+	# 调用 newClient 函数，但传入客户端名称以跳过提问
+	CLIENT=$CLIENT newClient
 }
 
 function revokeClient() {
-	NUMBEROFCLIENTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c "^V")
-	if [[ $NUMBEROFCLIENTS == '0' ]]; then
-		echo ""
-		echo "你没有现有的客户端！"
-		exit 1
+	if ! listClients; then
+		return
 	fi
 
-	echo ""
-	echo "选择你想吊销的现有客户端证书"
-	tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep "^V" | cut -d '=' -f 2 | nl -s ') '
+	NUMBEROFCLIENTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c "^V")
 	until [[ $CLIENTNUMBER -ge 1 && $CLIENTNUMBER -le $NUMBEROFCLIENTS ]]; do
 		if [[ $CLIENTNUMBER == '1' ]]; then
 			read -rp "选择一个客户端 [1]: " CLIENTNUMBER
@@ -1638,7 +1532,11 @@ function revokeClient() {
 	cp /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn/crl.pem
 	chmod 644 /etc/openvpn/crl.pem
 	find /home/ -maxdepth 2 -name "$CLIENT.ovpn" -delete
+	find /home/ -maxdepth 2 -name "$CLIENT-ipv4.ovpn" -delete
+	find /home/ -maxdepth 2 -name "$CLIENT-ipv6.ovpn" -delete
 	rm -f "/root/$CLIENT.ovpn"
+	rm -f "/root/$CLIENT-ipv4.ovpn"
+	rm -f "/root/$CLIENT-ipv6.ovpn"
 	sed -i "/^$CLIENT,.*/d" /etc/openvpn/ipp.txt
 	cp /etc/openvpn/easy-rsa/pki/index.txt{,.bk}
 
@@ -1712,26 +1610,40 @@ function removeOpenVPN() {
 	read -rp "你真的想移除 OpenVPN 吗？[y/n]: " -e -i y REMOVE
 	if [[ $REMOVE == 'y' ]]; then
 		# 从配置中获取 OpenVPN 端口
-		PORT=$(grep '^port ' /etc/openvpn/server.conf | cut -d " " -f 2)
-		PROTOCOL=$(grep '^proto ' /etc/openvpn/server.conf | cut -d " " -f 2)
+		if [[ -e /etc/openvpn/server-ipv4.conf ]]; then
+			PORT=$(grep '^port ' /etc/openvpn/server-ipv4.conf | cut -d " " -f 2)
+			PROTOCOL=$(grep '^proto ' /etc/openvpn/server-ipv4.conf | cut -d " " -f 2 | sed -e 's/4//g')
+		elif [[ -e /etc/openvpn/server.conf ]]; then
+			PORT=$(grep '^port ' /etc/openvpn/server.conf | cut -d " " -f 2)
+			PROTOCOL=$(grep '^proto ' /etc/openvpn/server.conf | cut -d " " -f 2 | sed -e 's/[46]//g')
+		fi
 
 		# 停止 OpenVPN
 		if [[ $OS == 'alpine' ]]; then
 			rc-service openvpn stop
-			rc-update del openvpn default
+			rc-update del openvpn default # 假设只有一个实例
 		elif [[ $OS =~ (fedora|arch|centos|oracle) ]]; then
-			systemctl disable openvpn-server@server
-			systemctl stop openvpn-server@server
+			systemctl disable openvpn-server@server-ipv4 2>/dev/null
+			systemctl stop openvpn-server@server-ipv4 2>/dev/null
+			systemctl disable openvpn-server@server-ipv6 2>/dev/null
+			systemctl stop openvpn-server@server-ipv6 2>/dev/null
+			systemctl disable openvpn-server@server 2>/dev/null
+			systemctl stop openvpn-server@server 2>/dev/null
 			# 移除定制服务
-			rm /etc/systemd/system/openvpn-server@.service
+			rm -f /etc/systemd/system/openvpn-server@.service
 		elif [[ $OS == "ubuntu" ]] && [[ $VERSION_ID == "16.04" ]]; then
+			# sysvinit 不支持多实例，简化处理
 			systemctl disable openvpn
 			systemctl stop openvpn
 		else
-			systemctl disable openvpn@server
-			systemctl stop openvpn@server
+			systemctl disable openvpn@server-ipv4 2>/dev/null
+			systemctl stop openvpn@server-ipv4 2>/dev/null
+			systemctl disable openvpn@server-ipv6 2>/dev/null
+			systemctl stop openvpn@server-ipv6 2>/dev/null
+			systemctl disable openvpn@server 2>/dev/null
+			systemctl stop openvpn@server 2>/dev/null
 			# 移除定制服务
-			rm /etc/systemd/system/openvpn\@.service
+			rm -f /etc/systemd/system/openvpn\@.service
 		fi
 
 		# 调用新的防火墙规则移除函数
@@ -1741,7 +1653,13 @@ function removeOpenVPN() {
 		if hash sestatus 2>/dev/null; then
 			if sestatus | grep "Current mode" | grep -qs "enforcing"; then
 				if [[ $PORT != '1194' ]]; then
-					semanage port -d -t openvpn_port_t -p "$PROTOCOL" "$PORT"
+					semanage port -d -t openvpn_port_t -p "$PROTOCOL" "$PORT" 2>/dev/null
+				fi
+				if [[ -e /etc/openvpn/server-ipv6.conf ]]; then
+					PORT_V6=$(grep '^port ' /etc/openvpn/server-ipv6.conf | cut -d " " -f 2)
+					if [[ $PORT_V6 != '1194' ]]; then
+						semanage port -d -t openvpn_port_t -p "$PROTOCOL" "$PORT_V6" 2>/dev/null
+					fi
 				fi
 			fi
 		fi
@@ -1787,7 +1705,8 @@ function manageMenu() {
 	echo "Git 仓库地址：https://github.com/angristan/openvpn-install"
 	echo ""
 
-	if [[ -e /etc/openvpn/server.conf && $AUTO_INSTALL != "y" ]]; then
+	# 检查是否存在任何服务器配置文件
+	if [[ (-e /etc/openvpn/server.conf || -e /etc/openvpn/server-ipv4.conf) && $AUTO_INSTALL != "y" ]]; then
 		echo "看起来 OpenVPN 已经安装。"
 		echo ""
 		echo "你想做什么？"
@@ -1837,7 +1756,7 @@ function manageMenu() {
 initialCheck
 
 # 检查 OpenVPN 是否已经安装
-if [[ -e /etc/openvpn/server.conf && $AUTO_INSTALL != "y" ]]; then
+if [[ (-e /etc/openvpn/server.conf || -e /etc/openvpn/server-ipv4.conf) && $AUTO_INSTALL != "y" ]]; then
 	manageMenu # 如果已安装，显示管理菜单
 else
 	manageMenu # 如果未安装，显示安装/卸载菜单
