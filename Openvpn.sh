@@ -1148,14 +1148,16 @@ verb 3" >>/etc/openvpn/server.conf
 	# 如果服务器在 NAT 后，请使用正确的 IP 地址让客户端连接到服务器
 	if [[ $ENDPOINT != "" ]]; then
 		# 如果是仅 IPv6 模式，确保 ENDPOINT 是一个 IPv6 地址
-		if [[ $NETWORK_MODE == "2" ]] && ! echo "$ENDPOINT" | grep -q ':'; then
-			echo "警告：你选择了仅 IPv6 模式，但提供的公共地址 '$ENDPOINT' 似乎不是 IPv6 地址。"
-			IP=$ENDPOINT # 仍然使用用户提供的值
-		else
+		IP=$ENDPOINT
+	fi
+
+	# 关键修复：在仅 IPv6 模式下，强制使用检测到的公共 IPv6 地址
+	if [[ $NETWORK_MODE == "2" ]]; then
+		IP=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
+		# 如果 ENDPOINT 是一个有效的 IPv6 地址，则优先使用它
+		if echo "$ENDPOINT" | grep -q ':'; then
 			IP=$ENDPOINT
 		fi
-	elif [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6 且没有 ENDPOINT，需要一个 IPv6 地址
-		IP=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
 	fi
 
 	# client-template.txt 被创建，以便以后可以添加更多用户
