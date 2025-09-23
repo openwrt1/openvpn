@@ -720,11 +720,13 @@ ip6tables -D FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/rm-openvpn-rules
 
 	# 通过 systemd 或 openrc 脚本处理规则
 	if [[ "$OS" == "alpine" ]]; then
-		echo "#!/sbin/openrc-run" >/etc/init.d/iptables-openvpn
-		echo "description=\"iptables rules for OpenVPN\"" >>/etc/init.d/iptables-openvpn
-		echo "depend() { need net; }" >>/etc/init.d/iptables-openvpn
-		echo "start() { /etc/iptables/add-openvpn-rules.sh; }" >>/etc/init.d/iptables-openvpn
-		echo "stop() { /etc/iptables/rm-openvpn-rules.sh; }" >>/etc/init.d/iptables-openvpn
+		cat >/etc/init.d/iptables-openvpn <<EOF
+#!/sbin/openrc-run
+description="iptables rules for OpenVPN"
+depend() { need net; }
+start() { /etc/iptables/add-openvpn-rules.sh; }
+stop() { /etc/iptables/rm-openvpn-rules.sh; }
+EOF
 		chmod +x /etc/init.d/iptables-openvpn
 		rc-update add iptables-openvpn default
 		rc-service iptables-openvpn start
@@ -939,130 +941,123 @@ function installOpenVPN() {
 	chmod 644 /etc/openvpn/crl.pem
 
 	# 生成 server.conf
-	echo "port $PORT" >/etc/openvpn/server.conf
-
-	echo "proto $PROTOCOL" >>/etc/openvpn/server.conf
-
-	echo "dev tun
+	{
+		echo "port $PORT"
+		echo "proto $PROTOCOL"
+		echo "dev tun
 user nobody
 group $NOGROUP
 persist-key
 persist-tun
-keepalive 10 120" >>/etc/openvpn/server.conf
-
-	# 即使在仅 IPv6 模式下，也需要 server 指令来定义拓扑结构
-	if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4, 仅 IPv6, 或双栈
-		echo "topology subnet
+keepalive 10 120"
+		echo "tun-mtu 1280
+mssfix 1280"
+		# 即使在仅 IPv6 模式下，也需要 server 指令来定义拓扑结构
+		if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4, 仅 IPv6, 或双栈
+			echo "topology subnet
 server 10.8.0.0 255.255.255.0
-ifconfig-pool-persist ipp.txt" >>/etc/openvpn/server.conf
-	fi
-
-	# DNS 解析器
-	case $DNS in
-	1) # 当前系统解析器
-		# 定位正确的 resolv.conf
-		# 对于运行 systemd-resolved 的系统是必须的
-		if grep -q "127.0.0.53" "/etc/resolv.conf"; then
-			RESOLVCONF='/run/systemd/resolve/resolv.conf'
-		else
-			RESOLVCONF='/etc/resolv.conf'
+ifconfig-pool-persist ipp.txt"
 		fi
-		# 从 resolv.conf 获取解析器并将它们用于 OpenVPN
-		sed -ne 's/^nameserver[[:space:]]\+\([^[:space:]]\+\).*$/\1/p' $RESOLVCONF | while read -r line; do
-			# 复制，如果是 IPv4 |或| 如果启用 IPv6，则 IPv4/IPv6 无关
-			if [[ $line =~ ^[0-9.]*$ ]] && [[ $NETWORK_MODE != "2" ]] || [[ $line =~ .*:.* ]] && [[ $NETWORK_MODE != "1" ]]; then
-				echo "push \"dhcp-option DNS $line\"" >>/etc/openvpn/server.conf
+		# DNS 解析器
+		case $DNS in
+		1) # 当前系统解析器
+			# 定位正确的 resolv.conf
+			# 对于运行 systemd-resolved 的系统是必须的
+			if grep -q "127.0.0.53" "/etc/resolv.conf"; then
+				RESOLVCONF='/run/systemd/resolve/resolv.conf'
+			else
+				RESOLVCONF='/etc/resolv.conf'
 			fi
-		done
-		;;
-	2) # 自托管 DNS 解析器（Unbound）
-		if [[ $NETWORK_MODE != "2" ]]; then echo 'push "dhcp-option DNS 10.8.0.1"' >>/etc/openvpn/server.conf; fi
-		if [[ $IPV6_SUPPORT == 'y' ]]; then
-			echo 'push "dhcp-option DNS fd42:42:42:42::1"' >>/etc/openvpn/server.conf
+			# 从 resolv.conf 获取解析器并将它们用于 OpenVPN
+			sed -ne 's/^nameserver[[:space:]]\+\([^[:space:]]\+\).*$/\1/p' "$RESOLVCONF" | while read -r line; do
+				# 复制，如果是 IPv4 |或| 如果启用 IPv6，则 IPv4/IPv6 无关
+				if [[ $line =~ ^[0-9.]*$ ]] && [[ $NETWORK_MODE != "2" ]] || [[ $line =~ .*:.* ]] && [[ $NETWORK_MODE != "1" ]]; then
+					echo "push \"dhcp-option DNS $line\""
+				fi
+			done
+			;;
+		2) # 自托管 DNS 解析器（Unbound）
+			if [[ $NETWORK_MODE != "2" ]]; then echo 'push "dhcp-option DNS 10.8.0.1"'; fi
+			if [[ $IPV6_SUPPORT == 'y' ]]; then
+				echo 'push "dhcp-option DNS fd42:42:42:42::1"'
+			fi
+			;;
+		3) # Cloudflare
+			echo 'push "dhcp-option DNS 1.0.0.1"'
+			echo 'push "dhcp-option DNS 1.1.1.1"'
+			;;
+		4) # Quad9
+			echo 'push "dhcp-option DNS 9.9.9.9"'
+			echo 'push "dhcp-option DNS 149.112.112.112"'
+			;;
+		5) # Quad9 未过滤版
+			echo 'push "dhcp-option DNS 9.9.9.10"'
+			echo 'push "dhcp-option DNS 149.112.112.10"'
+			;;
+		6) # FDN
+			echo 'push "dhcp-option DNS 80.67.169.40"'
+			echo 'push "dhcp-option DNS 80.67.169.12"'
+			;;
+		7) # DNS.WATCH
+			echo 'push "dhcp-option DNS 84.200.69.80"'
+			echo 'push "dhcp-option DNS 84.200.70.40"'
+			;;
+		8) # OpenDNS
+			echo 'push "dhcp-option DNS 208.67.222.222"'
+			echo 'push "dhcp-option DNS 208.67.220.220"'
+			;;
+		9) # Google
+			echo 'push "dhcp-option DNS 8.8.8.8"'
+			echo 'push "dhcp-option DNS 8.8.4.4"'
+			;;
+		10) # Yandex Basic
+			echo 'push "dhcp-option DNS 77.88.8.8"'
+			echo 'push "dhcp-option DNS 77.88.8.1"'
+			;;
+		11) # AdGuard DNS
+			echo 'push "dhcp-option DNS 94.140.14.14"'
+			echo 'push "dhcp-option DNS 94.140.15.15"'
+			;;
+		12) # NextDNS
+			echo 'push "dhcp-option DNS 45.90.28.167"'
+			echo 'push "dhcp-option DNS 45.90.30.167"'
+			;;
+		13) # 自定义 DNS
+			echo "push \"dhcp-option DNS $DNS1\""
+			if [[ $DNS2 != "" ]]; then
+				echo "push \"dhcp-option DNS $DNS2\""
+			fi
+			;;
+		esac
+		if [[ $NETWORK_MODE != "2" ]]; then # 仅 IPv4 或双栈
+			echo 'push "redirect-gateway def1 bypass-dhcp"'
 		fi
-		;;
-	3) # Cloudflare
-		echo 'push "dhcp-option DNS 1.0.0.1"' >>/etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 1.1.1.1"' >>/etc/openvpn/server.conf
-		;;
-	4) # Quad9
-		echo 'push "dhcp-option DNS 9.9.9.9"' >>/etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 149.112.112.112"' >>/etc/openvpn/server.conf
-		;;
-	5) # Quad9 未过滤版
-		echo 'push "dhcp-option DNS 9.9.9.10"' >>/etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 149.112.112.10"' >>/etc/openvpn/server.conf
-		;;
-	6) # FDN
-		echo 'push "dhcp-option DNS 80.67.169.40"' >>/etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 80.67.169.12"' >>/etc/openvpn/server.conf
-		;;
-	7) # DNS.WATCH
-		echo 'push "dhcp-option DNS 84.200.69.80"' >>/etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 84.200.70.40"' >>/etc/openvpn/server.conf
-		;;
-	8) # OpenDNS
-		echo 'push "dhcp-option DNS 208.67.222.222"' >>/etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 208.67.220.220"' >>/etc/openvpn/server.conf
-		;;
-	9) # Google
-		echo 'push "dhcp-option DNS 8.8.8.8"' >>/etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 8.8.4.4"' >>/etc/openvpn/server.conf
-		;;
-	10) # Yandex Basic
-		echo 'push "dhcp-option DNS 77.88.8.8"' >>/etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 77.88.8.1"' >>/etc/openvpn/server.conf
-		;;
-	11) # AdGuard DNS
-		echo 'push "dhcp-option DNS 94.140.14.14"' >>/etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 94.140.15.15"' >>/etc/openvpn/server.conf
-		;;
-	12) # NextDNS
-		echo 'push "dhcp-option DNS 45.90.28.167"' >>/etc/openvpn/server.conf
-		echo 'push "dhcp-option DNS 45.90.30.167"' >>/etc/openvpn/server.conf
-		;;
-	13) # 自定义 DNS
-		echo "push \"dhcp-option DNS $DNS1\"" >>/etc/openvpn/server.conf
-		if [[ $DNS2 != "" ]]; then
-			echo "push \"dhcp-option DNS $DNS2\"" >>/etc/openvpn/server.conf
-		fi
-		;;
-	esac
-
-	if [[ $NETWORK_MODE != "2" ]]; then # 仅 IPv4 或双栈
-		echo 'push "redirect-gateway def1 bypass-dhcp"' >>/etc/openvpn/server.conf
-	fi
-
-	# 如果需要，IPv6 网络设置
-	if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
-		echo 'server-ipv6 fd42:42:42:42::/112
+		# 如果需要，IPv6 网络设置
+		if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
+			echo 'server-ipv6 fd42:42:42:42::/112
 tun-ipv6
 push tun-ipv6
 push "route-ipv6 2000::/3"
-push "redirect-gateway ipv6"' >>/etc/openvpn/server.conf
-	fi
-
-	if [[ $COMPRESSION_ENABLED == "y" ]]; then
-		echo "compress $COMPRESSION_ALG" >>/etc/openvpn/server.conf
-	fi
-
-	if [[ $DH_TYPE == "1" ]]; then
-		echo "dh none" >>/etc/openvpn/server.conf
-		echo "ecdh-curve $DH_CURVE" >>/etc/openvpn/server.conf
-	elif [[ $DH_TYPE == "2" ]]; then
-		echo "dh dh.pem" >>/etc/openvpn/server.conf
-	fi
-
-	case $TLS_SIG in
-	1)
-		echo "tls-crypt tls-crypt.key" >>/etc/openvpn/server.conf
-		;;
-	2)
-		echo "tls-auth tls-auth.key 0" >>/etc/openvpn/server.conf
-		;;
-	esac
-
-	echo "crl-verify crl.pem
+push "redirect-gateway ipv6"'
+		fi
+		if [[ $COMPRESSION_ENABLED == "y" ]]; then
+			echo "compress $COMPRESSION_ALG"
+		fi
+		if [[ $DH_TYPE == "1" ]]; then
+			echo "dh none"
+			echo "ecdh-curve $DH_CURVE"
+		elif [[ $DH_TYPE == "2" ]]; then
+			echo "dh dh.pem"
+		fi
+		case $TLS_SIG in
+		1)
+			echo "tls-crypt tls-crypt.key"
+			;;
+		2)
+			echo "tls-auth tls-auth.key 0"
+			;;
+		esac
+		echo "crl-verify crl.pem
 ca ca.crt
 cert $SERVER_NAME.crt
 key $SERVER_NAME.key
@@ -1075,6 +1070,7 @@ tls-cipher $CC_CIPHER
 client-config-dir /etc/openvpn/ccd
 status /var/log/openvpn/status.log
 verb 3" >>/etc/openvpn/server.conf
+	} >/etc/openvpn/server.conf
 
 	# 创建 client-config-dir 目录
 	mkdir -p /etc/openvpn/ccd
@@ -1180,6 +1176,9 @@ tls-cipher $CC_CIPHER
 ignore-unknown-option block-outside-dns
 setenv opt block-outside-dns # 防止 Windows 10 DNS 泄漏
 verb 3" >>/etc/openvpn/client-template.txt
+
+	echo "tun-mtu 1280
+mssfix 1280" >>/etc/openvpn/client-template.txt
 
 	if [[ $COMPRESSION_ENABLED == "y" ]]; then
 		echo "compress $COMPRESSION_ALG" >>/etc/openvpn/client-template.txt
