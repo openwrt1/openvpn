@@ -913,8 +913,9 @@ group $NOGROUP
 persist-key
 persist-tun
 keepalive 10 120"
-                echo "tun-mtu 1280
-mssfix 1280"
+                # 移除硬编码的 tun-mtu，让 OpenVPN 自动协商
+                # 将 mssfix 设置为 0，让其根据协商的 MTU 动态计算
+                echo "mssfix 0"
                 # 即使在仅 IPv6 模式下，也需要 server 指令来定义拓扑结构
                 echo "topology subnet
 server 10.8.0.0 255.255.255.0
@@ -1149,8 +1150,9 @@ ignore-unknown-option block-outside-dns
 setenv opt block-outside-dns # 防止 Windows 10 DNS 泄漏
 verb 3" >>/etc/openvpn/client-template.txt
 
-        echo "tun-mtu 1280
-mssfix 1280" >>/etc/openvpn/client-template.txt
+        # 移除硬编码的 tun-mtu，让 OpenVPN 自动协商
+        # 将 mssfix 设置为 0，让其根据协商的 MTU 动态计算
+        echo "mssfix 0" >>/etc/openvpn/client-template.txt
 
         if [[ $COMPRESSION_ENABLED == "y" ]]; then
                 echo "compress $COMPRESSION_ALG" >>/etc/openvpn/client-template.txt
