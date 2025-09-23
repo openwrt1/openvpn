@@ -1187,14 +1187,16 @@ push "redirect-gateway ipv6"'
         # 确保它使用 /etc/openvpn 目录
         sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn-server@.service
         systemctl daemon-reload
-        if [[ $NETWORK_MODE == "3" ]]; then
-            systemctl enable openvpn-server@server-ipv4
-            systemctl restart openvpn-server@server-ipv4
-            systemctl enable openvpn-server@server-ipv6
-            systemctl restart openvpn-server@server-ipv6
+        if [[ $NETWORK_MODE == "3" ]]; then # 双栈模式
+			# 手动创建符号链接以确保正确性
+			ln -sf /etc/systemd/system/openvpn-server@.service /etc/systemd/system/multi-user.target.wants/openvpn-server@server-ipv4.service
+			ln -sf /etc/systemd/system/openvpn-server@.service /etc/systemd/system/multi-user.target.wants/openvpn-server@server-ipv6.service
+            systemctl restart openvpn-server@server-ipv4.service
+            systemctl restart openvpn-server@server-ipv6.service
         else
-            systemctl enable openvpn-server@server
-            systemctl restart openvpn-server@server
+			# 手动创建符号链接
+			ln -sf /etc/systemd/system/openvpn-server@.service /etc/systemd/system/multi-user.target.wants/openvpn-server@server.service
+            systemctl restart openvpn-server@server.service
         fi
     else # Ubuntu 16.04 (sysvinit)
         systemctl enable openvpn
@@ -1651,10 +1653,11 @@ function removeOpenVPN() {
 		elif [[ $OS =~ (fedora|arch|centos|oracle) ]]; then
 			systemctl disable openvpn-server@server-ipv4 2>/dev/null
 			systemctl stop openvpn-server@server-ipv4 2>/dev/null
-			systemctl disable openvpn-server@server-ipv6 2>/dev/null
+			rm -f /etc/systemd/system/multi-user.target.wants/openvpn-server@server-ipv4.service
 			systemctl stop openvpn-server@server-ipv6 2>/dev/null
-			systemctl disable openvpn-server@server 2>/dev/null
+			rm -f /etc/systemd/system/multi-user.target.wants/openvpn-server@server-ipv6.service
 			systemctl stop openvpn-server@server 2>/dev/null
+			rm -f /etc/systemd/system/multi-user.target.wants/openvpn-server@server.service
 			# 移除定制服务
 			rm -f /etc/systemd/system/openvpn-server@.service
 		elif [[ $OS == "ubuntu" ]] && [[ $VERSION_ID == "16.04" ]]; then
@@ -1662,12 +1665,12 @@ function removeOpenVPN() {
 			systemctl disable openvpn
 			systemctl stop openvpn
 		else
-			systemctl disable openvpn@server-ipv4 2>/dev/null
 			systemctl stop openvpn@server-ipv4 2>/dev/null
-			systemctl disable openvpn@server-ipv6 2>/dev/null
+			rm -f /etc/systemd/system/multi-user.target.wants/openvpn-server@server-ipv4.service
 			systemctl stop openvpn@server-ipv6 2>/dev/null
-			systemctl disable openvpn@server 2>/dev/null
+			rm -f /etc/systemd/system/multi-user.target.wants/openvpn-server@server-ipv6.service
 			systemctl stop openvpn@server 2>/dev/null
+			rm -f /etc/systemd/system/multi-user.target.wants/openvpn@server.service
 			# 移除定制服务
 			rm -f /etc/systemd/system/openvpn\@.service
 			# 恢复被重命名的原始服务文件
