@@ -1175,6 +1175,11 @@ push "redirect-gateway ipv6"'
         elif [[ -f /usr/lib/systemd/system/openvpn-server@.service ]]; then
             SERVICE_FILE="/usr/lib/systemd/system/openvpn-server@.service"
         fi
+        # 消除歧义：重命名系统自带的 openvpn@.service，防止 systemd 混淆
+        if [[ -f /lib/systemd/system/openvpn@.service ]]; then
+            mv /lib/systemd/system/openvpn@.service /lib/systemd/system/openvpn@.service.original
+        fi
+
         # 复制到 /etc/systemd/system 以便安全地修改
         cp "$SERVICE_FILE" /etc/systemd/system/openvpn-server@.service
         # 修复 OpenVPN 服务在 OpenVZ 上的问题
@@ -1665,6 +1670,10 @@ function removeOpenVPN() {
 			systemctl stop openvpn@server 2>/dev/null
 			# 移除定制服务
 			rm -f /etc/systemd/system/openvpn\@.service
+			# 恢复被重命名的原始服务文件
+			if [[ -f /lib/systemd/system/openvpn@.service.original ]]; then
+				mv /lib/systemd/system/openvpn@.service.original /lib/systemd/system/openvpn@.service
+			fi
 		fi
 
 		# 调用新的防火墙规则移除函数
