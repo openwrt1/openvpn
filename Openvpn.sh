@@ -1,4 +1,3 @@
-```bash
 #!/bin/bash
 # 为 Debian, Ubuntu, CentOS, Amazon Linux 2, Fedora, Oracle Linux 8, Arch Linux, Rocky Linux, AlmaLinux 和 Alpine Linux 安装安全的 OpenVPN 服务器。
 # https://github.com/yhdxtn/OpenVpn
