@@ -905,7 +905,9 @@ function installOpenVPN() {
 	{
 		echo "port $PORT"
 		if [[ $NETWORK_MODE == "1" ]]; then # 仅 IPv4
-			echo "proto ${PROTOCOL}4"
+			# 使用通用的 proto 让服务器同时监听 v4 和 v6
+			# 这样即使是 v4 模式，也能接受 v6 连接
+			echo "proto ${PROTOCOL}"
 		elif [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
 			echo "proto ${PROTOCOL}6"
 		fi
