@@ -681,7 +681,7 @@ iptables -I FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/add-openvpn-rules
 
 	# 检查 server.conf 是否包含 IPv6 server 指令，如果包含则添加 IPv6 规则
 	# 或者，如果启用了 IPv6 支持，也应该添加规则
-	if grep -q "^server-ipv6" /etc/openvpn/server.conf || [[ $IPV6_SUPPORT == 'y' ]]; then
+	if grep -q "^server-ipv6" /etc/openvpn/server.conf || [[ $NETWORK_MODE == "1" && $IPV6_SUPPORT == 'y' ]]; then
 		echo "ip6tables -t nat -A POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
 ip6tables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
 ip6tables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
@@ -701,7 +701,7 @@ iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/rm-openvpn-rules.
 
 	# 检查 server.conf 是否包含 IPv6 server 指令，如果包含则添加 IPv6 移除规则
 	# 或者，如果启用了 IPv6 支持，也应该添加规则
-	if grep -q "^server-ipv6" /etc/openvpn/server.conf || [[ $IPV6_SUPPORT == 'y' ]]; then
+	if grep -q "^server-ipv6" /etc/openvpn/server.conf || [[ $NETWORK_MODE == "1" && $IPV6_SUPPORT == 'y' ]]; then
 		echo "ip6tables -t nat -D POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
 ip6tables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
 ip6tables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
@@ -995,13 +995,18 @@ ifconfig-pool-persist ipp.txt"
 		if [[ $NETWORK_MODE != "2" ]]; then # 仅 IPv4 或双栈
 			echo 'push "redirect-gateway def1 bypass-dhcp"'
 		fi
-		if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
+		# 如果是仅 IPv6 模式，或在仅 IPv4 模式下启用了 IPv6 支持
+		if [[ $NETWORK_MODE == "2" || ($NETWORK_MODE == "1" && $IPV6_SUPPORT == 'y') ]]; then
 			echo 'server-ipv6 fd42:42:42:42::/112
 tun-ipv6
 push tun-ipv6
 push "route-ipv6 2000::/3"
 push "redirect-gateway ipv6"'
 		fi
+		# if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
+		# 	echo 'server-ipv6 fd42:42:42:42::/112
+		# fi
+
 		if [[ $COMPRESSION_ENABLED == "y" ]]; then
 			echo "compress $COMPRESSION_ALG"
 		fi
@@ -1046,7 +1051,7 @@ verb 3" >>/etc/openvpn/server.conf
 		# 创建一个空文件或只包含 IPv6 的文件
 		echo '# net.ipv4.ip_forward=1' >/etc/sysctl.d/99-openvpn.conf
 	fi
-	if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
+	if [[ $NETWORK_MODE == "2" || ($NETWORK_MODE == "1" && $IPV6_SUPPORT == 'y') ]]; then # 仅 IPv6 或在仅 IPv4 模式下启用 IPv6
 		echo 'net.ipv6.conf.all.forwarding=1' >>/etc/sysctl.d/99-openvpn.conf
 	fi
 	# 应用 sysctl 规则
