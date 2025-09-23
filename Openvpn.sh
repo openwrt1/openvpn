@@ -722,8 +722,8 @@ function configureFirewall() {
 				# 为双栈的 IPv6 实例端口也添加入站规则
 				echo "iptables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
 			fi
-			echo "iptables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT"
-			echo "iptables -I FORWARD -i tun0 -o $NIC -j ACCEPT"
+			echo "iptables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
+			echo "iptables -I FORWARD -i tun0 -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
 		fi
 
 		# 如果 server-ipv6.conf 存在或是仅 IPv6/双栈模式，则添加 IPv6 规则
@@ -734,8 +734,8 @@ function configureFirewall() {
 				# 为双栈的 IPv6 实例端口也添加入站规则
 				echo "ip6tables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
 			fi
-			echo "ip6tables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT"
-			echo "ip6tables -I FORWARD -i tun0 -o $NIC -j ACCEPT"
+			echo "ip6tables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
+			echo "ip6tables -I FORWARD -i tun0 -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
 		fi
 	} >/etc/iptables/add-openvpn-rules.sh
 
@@ -748,8 +748,8 @@ function configureFirewall() {
 			if [[ $NETWORK_MODE == "3" ]]; then
 				echo "iptables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
 			fi
-			echo "iptables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT"
-			echo "iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT"
+			echo "iptables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
+			echo "iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
 		fi
 
 		if [[ -e /etc/openvpn/server-ipv6.conf || $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then
@@ -758,8 +758,8 @@ function configureFirewall() {
 			if [[ $NETWORK_MODE == "3" ]]; then
 				echo "ip6tables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
 			fi
-			echo "ip6tables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT"
-			echo "ip6tables -D FORWARD -i tun0 -o $NIC -j ACCEPT"
+			echo "ip6tables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
+			echo "ip6tables -D FORWARD -i tun0 -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
 		fi
 	} >/etc/iptables/rm-openvpn-rules.sh
 
@@ -1162,47 +1162,38 @@ push "redirect-gateway ipv6"'
 	fi
 
 	# 最后，重启并启用 OpenVPN
-	if [[ $OS == 'alpine' ]]; then
-		rc-update add openvpn default
-		# Alpine 不支持多实例，这里简化处理
-		rc-service openvpn restart # 默认会使用 server.conf
-	elif [[ $OS == 'arch' || $OS == 'fedora' || $OS == 'centos' || $OS == 'oracle' ]]; then
-		# 不修改包提供的服务
-		cp /usr/lib/systemd/system/openvpn-server@.service /etc/systemd/system/openvpn-server@.service
-		# 修复 OpenVPN 服务在 OpenVZ 上的问题
-		sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn-server@.service
-		sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn-server@.service
-		systemctl daemon-reload
-		if [[ $NETWORK_MODE == "3" ]]; then
-			systemctl enable openvpn-server@server-ipv4
-			systemctl restart openvpn-server@server-ipv4
-			systemctl enable openvpn-server@server-ipv6
-			systemctl restart openvpn-server@server-ipv6
-		else
-			systemctl enable openvpn-server@server
-			systemctl restart openvpn-server@server
-		fi
-	elif [[ $OS == "ubuntu" ]] && [[ $VERSION_ID == "16.04" ]]; then
-		# sysvinit 不支持多实例，简化处理
-		systemctl enable openvpn
-		systemctl start openvpn
-	else
-		# 不修改包提供的服务
-		cp /lib/systemd/system/openvpn\@.service /etc/systemd/system/openvpn\@.service
-		# 修复 OpenVPN 服务在 OpenVZ 上的问题
-		sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn\@.service
-		sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn\@.service
-		systemctl daemon-reload
-		if [[ $NETWORK_MODE == "3" ]]; then
-			systemctl enable openvpn@server-ipv4
-			systemctl restart openvpn@server-ipv4
-			systemctl enable openvpn@server-ipv6
-			systemctl restart openvpn@server-ipv6
-		else
-			systemctl enable openvpn@server
-			systemctl restart openvpn@server
-		fi
-	fi
+    if [[ $OS == 'alpine' ]]; then
+        rc-update add openvpn default
+        # Alpine 不支持多实例，这里简化处理
+        rc-service openvpn restart # 默认会使用 server.conf
+    elif [[ $OS != "ubuntu" || $VERSION_ID != "16.04" ]]; then
+        # 适用于所有现代 systemd 系统
+        # 确定原始服务文件的路径
+        if [[ -f /lib/systemd/system/openvpn-server@.service ]]; then
+            SERVICE_FILE="/lib/systemd/system/openvpn-server@.service"
+        elif [[ -f /usr/lib/systemd/system/openvpn-server@.service ]]; then
+            SERVICE_FILE="/usr/lib/systemd/system/openvpn-server@.service"
+        fi
+        # 复制到 /etc/systemd/system 以便安全地修改
+        cp "$SERVICE_FILE" /etc/systemd/system/openvpn-server@.service
+        # 修复 OpenVPN 服务在 OpenVZ 上的问题
+        sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn-server@.service
+        # 确保它使用 /etc/openvpn 目录
+        sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn-server@.service
+        systemctl daemon-reload
+        if [[ $NETWORK_MODE == "3" ]]; then
+            systemctl enable openvpn-server@server-ipv4
+            systemctl restart openvpn-server@server-ipv4
+            systemctl enable openvpn-server@server-ipv6
+            systemctl restart openvpn-server@server-ipv6
+        else
+            systemctl enable openvpn-server@server
+            systemctl restart openvpn-server@server
+        fi
+    else # Ubuntu 16.04 (sysvinit)
+        systemctl enable openvpn
+        systemctl start openvpn
+    fi
 
 	if [[ $DNS == 2 ]]; then
 		installUnbound
