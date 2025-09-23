@@ -1691,17 +1691,21 @@ function removeOpenVPN() {
 			# 移除定制服务
 			rm /etc/systemd/system/openvpn\@.service
 		fi
-		
-		# 强制清理：确保所有 openvpn 进程都被终止
-		# 这可以防止因 systemctl stop 失败或存在多个冲突服务而导致的端口占用问题
-		echo "正在尝试停止所有已知的 OpenVPN 服务变体..."
-		systemctl stop openvpn-server@server.service openvpn-server@server-ipv4.service openvpn.service >/dev/null 2>&1
-		systemctl disable openvpn-server@server.service openvpn-server@server-ipv4.service openvpn.service >/dev/null 2>&1
 
-		if pgrep "openvpn" > /dev/null; then
+		# 强制清理：确保所有 openvpn 进程都被终止。
+		# 这可以防止因 systemctl stop 失败或存在多个冲突服务而导致的端口占用问题。
+		if systemctl list-units --type=service | grep -q 'openvpn'; then
+			echo "正在尝试停止所有已知的 OpenVPN 服务变体..."
+			systemctl stop 'openvpn@*.service' openvpn.service openvpn-server@.service >/dev/null 2>&1
+			systemctl disable 'openvpn@*.service' openvpn.service openvpn-server@.service >/dev/null 2>&1
+		fi
+
+		# 最后的保障措施，以防万一
+		if pgrep -x "openvpn" >/dev/null; then
 			echo "检测到残留的 OpenVPN 进程，正在强制终止..."
-			killall openvpn
-			sleep 1 # 等待进程退出
+			killall openvpn >/dev/null 2>&1
+			# 等待进程完全退出
+			sleep 1
 		fi
 
 		# 移除其他可能的 systemd 服务文件
