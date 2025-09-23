@@ -240,12 +240,6 @@ function installQuestions() {
 	echo "你可以保留默认选项，并在确认时按回车键。"
 	echo ""
 
-	# 检测公共 IPv4 和 IPv6 地址
-	IP=$(ip -4 addr | sed -ne 's|^.* inet \([^/]*\)/.* scope global.*$|\1|p' | head -1)
-	if [[ -z $IP ]]; then
-		IP=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
-	fi
-
 	echo "检查 IPv6 连接..."
 	# "ping6" 和 "ping -6" 可用性因发行版而异
 	if type ping6 >/dev/null 2>&1; then
@@ -274,12 +268,39 @@ function installQuestions() {
 		read -rp "网络模式 [1-3]: " -e -i 1 NETWORK_MODE
 	done
 	
-	echo ""
-	echo "我需要知道你希望 OpenVPN 监听的网络接口的 IP 地址。"
-	APPROVE_IP=${APPROVE_IP:-n}
-	if [[ $APPROVE_IP =~ n ]]; then
-		read -rp "IP 地址: " -e -i "$IP" IP
+	# 根据网络模式获取监听 IP
+	if [[ $NETWORK_MODE == "1" ]]; then # 仅 IPv4
+		echo ""
+		echo "我需要知道你希望 OpenVPN 监听的 IPv4 地址。"
+		IP=$(ip -4 addr | sed -ne 's|^.* inet \([^/]*\)/.* scope global.*$|\1|p' | head -1)
+		read -rp "IPv4 地址: " -e -i "$IP" IP
+	elif [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
+		echo ""
+		echo "我需要知道你希望 OpenVPN 监听的 IPv6 地址。"
+		IP=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
+		read -rp "IPv6 地址: " -e -i "$IP" IP
+	elif [[ $NETWORK_MODE == "3" ]]; then # 双栈
+		echo ""
+		echo "我需要知道你希望 OpenVPN 监听的 IPv4 和 IPv6 地址。"
+		IPV4_IP=$(ip -4 addr | sed -ne 's|^.* inet \([^/]*\)/.* scope global.*$|\1|p' | head -1)
+		read -rp "IPv4 地址: " -e -i "$IPV4_IP" IPV4_IP
+		# 在双栈模式下，IP 变量将用于 IPv4 实例
+		IP=$IPV4_IP
+
+		IPV6_IP=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
+		read -rp "IPv6 地址: " -e -i "$IPV6_IP" IPV6_IP
 	fi
+
+	# 检查 IP 是否有效
+	if [[ -z "$IP" && $NETWORK_MODE != "3" ]]; then
+		echo "错误：无法检测到所选网络模式的 IP 地址。"
+		exit 1
+	fi
+	if [[ $NETWORK_MODE == "3" && (-z "$IPV4_IP" || -z "$IPV6_IP") ]]; then
+		echo "错误：在双栈模式下，必须同时提供 IPv4 和 IPv6 地址。"
+		exit 1
+	fi
+
 
 	# 如果 $IP 是私有 IP 地址，服务器必须在 NAT 后面
 	if echo "$IP" | grep -qE '^(10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.|192\.168)'; then
