@@ -269,9 +269,8 @@ function installQuestions() {
 	echo "你想为 VPN 使用哪种网络模式？"
 	echo "   1) 仅 IPv4"
 	echo "   2) 仅 IPv6"
-	echo "   3) 双栈 (IPv4 和 IPv6)"
-	until [[ $NETWORK_MODE =~ ^[1-3]$ ]]; do
-		read -rp "网络模式 [1-3]: " -e -i 1 NETWORK_MODE
+	until [[ $NETWORK_MODE =~ ^[1-2]$ ]]; do
+		read -rp "网络模式 [1-2]: " -e -i 1 NETWORK_MODE
 	done
 
 	echo ""
@@ -285,19 +284,7 @@ function installQuestions() {
 	if echo "$IP" | grep -qE '^(10\.|172\.1[6789]\.|172\.2[0-9]\.|172\.3[01]\.|192\.168)'; then
 		echo ""
 		echo "看起来这台服务器在 NAT 后面。我们需要它的公共地址或主机名。"
-
-		if [[ $NETWORK_MODE == "3" ]]; then
-			PUBLIC_IP_V4=$(curl -s https://api.ipify.org)
-			read -rp "公共 IPv4 地址或主机名: " -e -i "$PUBLIC_IP_V4" ENDPOINT_V4
-
-			if ! [[ "$ENDPOINT_V4" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && ! [[ "$ENDPOINT_V4" =~ .*:.* ]]; then
-				ENDPOINT_V6=$ENDPOINT_V4
-				echo "检测到主机名，将用于 IPv4 和 IPv6。"
-			else
-				PUBLIC_IP_V6=$(curl -s https://api64.ipify.org)
-				read -rp "公共 IPv6 地址 (如果可用): " -e -i "$PUBLIC_IP_V6" ENDPOINT_V6
-			fi
-		elif [[ $NETWORK_MODE == "1" ]]; then
+		if [[ $NETWORK_MODE == "1" ]]; then
 			PUBLICIP=$(curl -s https://api.ipify.org)
 			until [[ $ENDPOINT != "" ]]; do
 				read -rp "公共 IPv4 地址或主机名: " -e -i "$PUBLICIP" ENDPOINT
@@ -760,12 +747,7 @@ WantedBy=multi-user.target" >/etc/systemd/system/iptables-openvpn.service
 
 function installOpenVPN() {
 	if [[ $AUTO_INSTALL == "y" ]]; then
-		# 设置默认选项，这样就不会再询问问题。
-		if [[ $IPV6_SUPPORT == "y" ]]; then
-			NETWORK_MODE=${NETWORK_MODE:-3} # 双栈
-		else
-			NETWORK_MODE=${NETWORK_MODE:-1} # 仅 IPv4
-		fi
+		NETWORK_MODE=${NETWORK_MODE:-1} # 仅 IPv4
 		PROTOCOL_CHOICE=${PROTOCOL_CHOICE:-1}
 		DNS=${DNS:-1}
 		COMPRESSION_ENABLED=${COMPRESSION_ENABLED:-n}
@@ -788,33 +770,6 @@ function installOpenVPN() {
 
 	# 首先运行设置问题，如果是自动安装则设置其他变量
 	installQuestions
-
-	# 确保 /etc/openvpn 目录存在
-	mkdir -p /etc/openvpn
-
-	# 如果是双栈模式，保存 IPv4 和 IPv6 端点
-	if [[ $NETWORK_MODE == "3" ]]; then
-		if [[ -n "$ENDPOINT_V4" ]]; then
-			echo "$ENDPOINT_V4" > /etc/openvpn/endpoint_v4
-			IP=$ENDPOINT_V4 # 默认用于第一个客户端
-		else
-			# 不在 NAT 后面，自动检测
-			PUBLIC_IP_V4=$(ip -4 addr | sed -ne 's|^.* inet \([^/]*\)/.* scope global.*$|\1|p' | head -1)
-			if [[ -n "$PUBLIC_IP_V4" ]]; then
-				echo "$PUBLIC_IP_V4" > /etc/openvpn/endpoint_v4
-				IP=$PUBLIC_IP_V4
-			fi
-		fi
-		if [[ -n "$ENDPOINT_V6" ]]; then
-			echo "$ENDPOINT_V6" > /etc/openvpn/endpoint_v6
-		else
-			# 不在 NAT 后面，自动检测
-			PUBLIC_IP_V6=$(ip -6 addr | sed -ne 's|^.* inet6 \([^/]*\)/.* scope global.*$|\1|p' | head -1)
-			if [[ -n "$PUBLIC_IP_V6" ]]; then
-				echo "$PUBLIC_IP_V6" > /etc/openvpn/endpoint_v6
-			fi
-		fi
-	fi
 
 	# 从默认路由获取“公共”接口
 	NIC=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
@@ -953,8 +908,6 @@ function installOpenVPN() {
 			echo "proto ${PROTOCOL}4"
 		elif [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
 			echo "proto ${PROTOCOL}6"
-		else # 双栈
-			echo "proto $PROTOCOL"
 		fi
 		echo "dev tun
 user nobody
@@ -965,11 +918,9 @@ keepalive 10 120"
 		echo "tun-mtu 1280
 mssfix 1280"
 		# 即使在仅 IPv6 模式下，也需要 server 指令来定义拓扑结构
-		if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4, 仅 IPv6, 或双栈
-			echo "topology subnet
+		echo "topology subnet
 server 10.8.0.0 255.255.255.0
 ifconfig-pool-persist ipp.txt"
-		fi
 		# DNS 解析器
 		case $DNS in
 		1) # 当前系统解析器
@@ -1044,8 +995,7 @@ ifconfig-pool-persist ipp.txt"
 		if [[ $NETWORK_MODE != "2" ]]; then # 仅 IPv4 或双栈
 			echo 'push "redirect-gateway def1 bypass-dhcp"'
 		fi
-		# 如果需要，IPv6 网络设置
-		if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
+		if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
 			echo 'server-ipv6 fd42:42:42:42::/112
 tun-ipv6
 push tun-ipv6
@@ -1090,13 +1040,13 @@ verb 3" >>/etc/openvpn/server.conf
 	mkdir -p /var/log/openvpn
 
 	# 启用路由
-	if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
+	if [[ $NETWORK_MODE == "1" ]]; then # 仅 IPv4
 		echo 'net.ipv4.ip_forward=1' >/etc/sysctl.d/99-openvpn.conf
 	else # 仅 IPv6
 		# 创建一个空文件或只包含 IPv6 的文件
 		echo '# net.ipv4.ip_forward=1' >/etc/sysctl.d/99-openvpn.conf
 	fi
-	if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
+	if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
 		echo 'net.ipv6.conf.all.forwarding=1' >>/etc/sysctl.d/99-openvpn.conf
 	fi
 	# 应用 sysctl 规则
@@ -1216,9 +1166,8 @@ function newClient() {
 		echo "服务器支持双栈。你想要哪种类型的客户端配置文件？"
 		echo "   1) IPv4"
 		echo "   2) IPv6"
-		echo "   3) 生成两个文件 (IPv4 和 IPv6)"
-		until [[ $CLIENT_PROTO_CHOICE =~ ^[1-3]$ ]]; do
-			read -rp "客户端类型 [1-3]: " -e -i 1 CLIENT_PROTO_CHOICE
+		until [[ $CLIENT_PROTO_CHOICE =~ ^[1-2]$ ]]; do
+			read -rp "客户端类型 [1-2]: " -e -i 1 CLIENT_PROTO_CHOICE
 		done
 	fi
 
@@ -1287,7 +1236,7 @@ function newClient() {
 	local port
 	port=$(grep -oP '^port \K\d+' /etc/openvpn/server.conf)
 
-	if [[ $CLIENT_PROTO_CHOICE == "1" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv4 或 两者
+	if [[ $CLIENT_PROTO_CHOICE == "1" ]]; then # 仅 IPv4
 		local endpoint_v4
 		endpoint_v4=$(cat /etc/openvpn/endpoint_v4)
 		local client_config_path="$homeDir/$CLIENT-ipv4.ovpn"
@@ -1336,7 +1285,7 @@ function newClient() {
 		echo "IPv4 配置文件已写入 $homeDir/$CLIENT-ipv4.ovpn。"
 	fi
 
-	if [[ $CLIENT_PROTO_CHOICE == "2" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv6 或 两者
+	if [[ $CLIENT_PROTO_CHOICE == "2" ]]; then # 仅 IPv6
 		local endpoint_v6
 		endpoint_v6=$(cat /etc/openvpn/endpoint_v6) # 修复：将 'lz0' 改为正确的 'lzo'
 		local client_config_path="$homeDir/$CLIENT-ipv6.ovpn"
@@ -1450,9 +1399,8 @@ function regenerateClient() {
 		echo "服务器支持双栈。你想要哪种类型的客户端配置文件？"
 		echo "   1) IPv4"
 		echo "   2) IPv6"
-		echo "   3) 生成两个文件 (IPv4 和 IPv6)"
-		until [[ $CLIENT_PROTO_CHOICE =~ ^[1-3]$ ]]; do
-			read -rp "客户端类型 [1-3]: " -e -i 1 CLIENT_PROTO_CHOICE
+		until [[ $CLIENT_PROTO_CHOICE =~ ^[1-2]$ ]]; do
+			read -rp "客户端类型 [1-2]: " -e -i 1 CLIENT_PROTO_CHOICE
 		done
 	fi
 
@@ -1480,7 +1428,7 @@ function regenerateClient() {
 	local port
 	port=$(grep -oP '^port \K\d+' /etc/openvpn/server.conf)
 
-	if [[ $CLIENT_PROTO_CHOICE == "1" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv4 或 两者
+	if [[ $CLIENT_PROTO_CHOICE == "1" ]]; then # 仅 IPv4
 		local endpoint_v4
 		endpoint_v4=$(cat /etc/openvpn/endpoint_v4)
 		local client_config_path="$homeDir/$CLIENT-ipv4.ovpn"
@@ -1529,7 +1477,7 @@ function regenerateClient() {
 		echo "IPv4 配置文件已重新生成于 $homeDir/$CLIENT-ipv4.ovpn。"
 	fi
 
-	if [[ $CLIENT_PROTO_CHOICE == "2" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv6 或 两者
+	if [[ $CLIENT_PROTO_CHOICE == "2" ]]; then # 仅 IPv6
 		local endpoint_v6
 		endpoint_v6=$(cat /etc/openvpn/endpoint_v6) # 修复：将 'lz0' 改为正确的 'lzo'
 		local client_config_path="$homeDir/$CLIENT-ipv6.ovpn"
