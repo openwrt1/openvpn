@@ -722,8 +722,8 @@ function configureFirewall() {
 				# 为双栈的 IPv6 实例端口也添加入站规则
 				echo "iptables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
 			fi
-			echo "iptables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
-			echo "iptables -I FORWARD -i tun0 -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
+			echo "iptables -I FORWARD -i $NIC -o tun+ -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
+			echo "iptables -I FORWARD -i tun+ -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
 		fi
 
 		# 如果 server-ipv6.conf 存在或是仅 IPv6/双栈模式，则添加 IPv6 规则
@@ -734,8 +734,8 @@ function configureFirewall() {
 				# 为双栈的 IPv6 实例端口也添加入站规则
 				echo "ip6tables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
 			fi
-			echo "ip6tables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
-			echo "ip6tables -I FORWARD -i tun0 -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
+			echo "ip6tables -I FORWARD -i $NIC -o tun+ -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
+			echo "ip6tables -I FORWARD -i tun+ -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
 		fi
 	} >/etc/iptables/add-openvpn-rules.sh
 
@@ -748,8 +748,8 @@ function configureFirewall() {
 			if [[ $NETWORK_MODE == "3" ]]; then
 				echo "iptables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
 			fi
-			echo "iptables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
-			echo "iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
+			echo "iptables -D FORWARD -i $NIC -o tun+ -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
+			echo "iptables -D FORWARD -i tun+ -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
 		fi
 
 		if [[ -e /etc/openvpn/server-ipv6.conf || $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then
@@ -758,8 +758,8 @@ function configureFirewall() {
 			if [[ $NETWORK_MODE == "3" ]]; then
 				echo "ip6tables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT_V6 -j ACCEPT"
 			fi
-			echo "ip6tables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
-			echo "ip6tables -D FORWARD -i tun0 -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
+			echo "ip6tables -D FORWARD -i $NIC -o tun+ -m state --state RELATED,ESTABLISHED -j ACCEPT" # 允许已建立的连接返回
+			echo "ip6tables -D FORWARD -i tun+ -o $NIC -j ACCEPT" # 允许从 VPN 客户端到外部的流量
 		fi
 	} >/etc/iptables/rm-openvpn-rules.sh
 
@@ -991,7 +991,6 @@ function installOpenVPN() {
 
 	# 生成通用配置部分
 	read -r -d '' COMMON_CONFIG << EOM
-dev tun
 user nobody
 group $NOGROUP
 persist-key
@@ -1086,6 +1085,7 @@ EOM
 		{
 			echo "port $PORT"
 			echo "proto ${PROTOCOL}4"
+			echo "dev tun0"
 			echo -e "$COMMON_CONFIG"
 			echo -e "$DNS_CONFIG"
 			echo 'push "redirect-gateway def1 bypass-dhcp"'
@@ -1112,6 +1112,7 @@ push "redirect-gateway ipv6"'
 		{
 			echo "port $port_v6"
 			echo "proto ${PROTOCOL}6"
+			echo "dev tun1"
 			echo -e "$COMMON_CONFIG"
 			echo -e "$DNS_CONFIG"
 			# 即使在仅 IPv6 连接模式下，隧道内也支持双栈，所以推送两个网关
