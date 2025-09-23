@@ -684,14 +684,17 @@ function configureFirewall() {
 
 	# 添加规则的脚本
 	echo "#!/bin/sh" >/etc/iptables/add-openvpn-rules.sh
-	if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
+	# 检查 server.conf 是否包含 IPv4 server 指令，如果包含则添加 IPv4 规则
+	if grep -q "^server\s*10\.8\.0\.0" /etc/openvpn/server.conf; then
 		echo "iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
 iptables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
 iptables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 iptables -I FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/add-openvpn-rules.sh
 	fi
 
-	if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
+	# 检查 server.conf 是否包含 IPv6 server 指令，如果包含则添加 IPv6 规则
+	# 或者，如果启用了 IPv6 支持，也应该添加规则
+	if grep -q "^server-ipv6" /etc/openvpn/server.conf || [[ $IPV6_SUPPORT == 'y' ]]; then
 		echo "ip6tables -t nat -A POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
 ip6tables -I INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
 ip6tables -I FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
@@ -701,14 +704,17 @@ ip6tables -I FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/add-openvpn-rule
 	# 删除规则的脚本
 	echo "#!/bin/sh" >/etc/iptables/rm-openvpn-rules.sh
 
-	if [[ $NETWORK_MODE == "1" || $NETWORK_MODE == "3" ]]; then # 仅 IPv4 或双栈
+	# 检查 server.conf 是否包含 IPv4 server 指令，如果包含则添加 IPv4 移除规则
+	if grep -q "^server\s*10\.8\.0\.0" /etc/openvpn/server.conf; then
 		echo "iptables -t nat -D POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
 iptables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
 iptables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 iptables -D FORWARD -i tun0 -o $NIC -j ACCEPT" >>/etc/iptables/rm-openvpn-rules.sh
 	fi
 
-	if [[ $NETWORK_MODE == "2" || $NETWORK_MODE == "3" ]]; then # 仅 IPv6 或双栈
+	# 检查 server.conf 是否包含 IPv6 server 指令，如果包含则添加 IPv6 移除规则
+	# 或者，如果启用了 IPv6 支持，也应该添加规则
+	if grep -q "^server-ipv6" /etc/openvpn/server.conf || [[ $IPV6_SUPPORT == 'y' ]]; then
 		echo "ip6tables -t nat -D POSTROUTING -s fd42:42:42:42::/112 -o $NIC -j MASQUERADE
 ip6tables -D INPUT -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT
 ip6tables -D FORWARD -i $NIC -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
