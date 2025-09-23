@@ -4,9 +4,13 @@
 
 该脚本基于 [angristan/openvpn-install](https://github.com/angristan/openvpn-install) 并进行了修改。
 
-## 安装
+## `main` 分支 (推荐)
 
-在你的服务器上运行以下命令：
+此分支提供稳定版本，安装时可选择“仅 IPv4”或“仅 IPv6”模式。
+*   **仅 IPv4 模式**: 服务器将同时监听 IPv4 和 IPv6 地址，并能处理双栈流量，但客户端默认使用 IPv4 连接。
+*   **仅 IPv6 模式**: 服务器仅监听 IPv6 地址。
+
+### 安装 `main` 分支
 
 ```sh
 wget https://raw.githubusercontent.com/openwrt1/openvpn/main/Openvpn.sh && chmod +x Openvpn.sh && ./Openvpn.sh
