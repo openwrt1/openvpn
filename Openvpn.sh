@@ -943,7 +943,11 @@ function installOpenVPN() {
 	# 生成 server.conf
 	{
 		echo "port $PORT"
-		echo "proto $PROTOCOL"
+		if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
+			echo "proto ${PROTOCOL}6"
+		else # 仅 IPv4 或双栈
+			echo "proto ${PROTOCOL}4"
+		fi
 		echo "dev tun
 user nobody
 group $NOGROUP
@@ -1157,7 +1161,11 @@ verb 3" >>/etc/openvpn/server.conf
 	# client-template.txt 被创建，以便以后可以添加更多用户
 	echo "client" >/etc/openvpn/client-template.txt
 	if [[ $PROTOCOL == 'tcp' ]]; then
-		echo "proto tcp-client" >>/etc/openvpn/client-template.txt
+		if [[ $NETWORK_MODE == "2" ]]; then # 仅 IPv6
+			echo "proto tcp6-client" >>/etc/openvpn/client-template.txt
+		else # 仅 IPv4 或双栈
+			echo "proto tcp4-client" >>/etc/openvpn/client-template.txt
+		fi
 	fi
 	echo "remote $IP $PORT
 dev tun
@@ -1271,12 +1279,22 @@ function newClient() {
 	if [[ $CLIENT_PROTO_CHOICE == "1" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv4 或 两者
 		local endpoint_v4
 		endpoint_v4=$(cat /etc/openvpn/endpoint_v4)
-		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv4.ovpn" # 修复：将 'lz0' 改为正确的 'lzo'
+		local client_config_path="$homeDir/$CLIENT-ipv4.ovpn"
+		cp /etc/openvpn/client-template.txt "$client_config_path"
+
+		# 为 IPv4 客户端设置正确的 proto
+		if [[ $PROTOCOL == 'udp' ]]; then
+			sed -i '/^proto /d' "$client_config_path" # 移除模板中的 proto 行
+			echo "proto udp4" >> "$client_config_path"
+		elif [[ $PROTOCOL == 'tcp' ]]; then
+			sed -i "s/proto tcp[46]*-client/proto tcp4-client/" "$client_config_path"
+		fi
+
 		# 如果是 IPv6 地址，则添加括号
 		if echo "$endpoint_v4" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v4] $port/" "$homeDir/$CLIENT-ipv4.ovpn"
+			sed -i "s/^remote .*/remote [$endpoint_v4] $port/" "$client_config_path"
 		else
-			sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$homeDir/$CLIENT-ipv4.ovpn"
+			sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$client_config_path"
 		fi
 
 		{
@@ -1301,21 +1319,31 @@ function newClient() {
 				cat /etc/openvpn/tls-auth.key
 				echo "</tls-auth>"
 				;;
-			esac
-		} >>"$homeDir/$CLIENT-ipv4.ovpn"
+			esac # 修复：将 'lz0' 改为正确的 'lzo'
+		} >>"$client_config_path"
 		echo ""
 		echo "IPv4 配置文件已写入 $homeDir/$CLIENT-ipv4.ovpn。"
 	fi
 
 	if [[ $CLIENT_PROTO_CHOICE == "2" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv6 或 两者
 		local endpoint_v6
-		endpoint_v6=$(cat /etc/openvpn/endpoint_v6)
-		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv6.ovpn" # 修复：将 'lz0' 改为正确的 'lzo'
+		endpoint_v6=$(cat /etc/openvpn/endpoint_v6) # 修复：将 'lz0' 改为正确的 'lzo'
+		local client_config_path="$homeDir/$CLIENT-ipv6.ovpn"
+		cp /etc/openvpn/client-template.txt "$client_config_path"
+
+		# 为 IPv6 客户端设置正确的 proto
+		if [[ $PROTOCOL == 'udp' ]]; then
+			sed -i '/^proto /d' "$client_config_path" # 移除模板中的 proto 行
+			echo "proto udp6" >> "$client_config_path"
+		elif [[ $PROTOCOL == 'tcp' ]]; then
+			sed -i "s/proto tcp[46]*-client/proto tcp6-client/" "$client_config_path"
+		fi
+
 		# 如果是 IPv6 地址，则添加括号
 		if echo "$endpoint_v6" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v6] $port/" "$homeDir/$CLIENT-ipv6.ovpn"
+			sed -i "s/^remote .*/remote [$endpoint_v6] $port/" "$client_config_path"
 		else
-			sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$homeDir/$CLIENT-ipv6.ovpn"
+			sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$client_config_path"
 		fi
 
 		{
@@ -1340,8 +1368,8 @@ function newClient() {
 				cat /etc/openvpn/tls-auth.key
 				echo "</tls-auth>"
 				;;
-			esac
-		} >>"$homeDir/$CLIENT-ipv6.ovpn"
+			esac # 修复：将 'lz0' 改为正确的 'lzo'
+		} >>"$client_config_path"
 		echo ""
 		echo "IPv6 配置文件已写入 $homeDir/$CLIENT-ipv6.ovpn。"
 	fi
@@ -1444,12 +1472,22 @@ function regenerateClient() {
 	if [[ $CLIENT_PROTO_CHOICE == "1" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv4 或 两者
 		local endpoint_v4
 		endpoint_v4=$(cat /etc/openvpn/endpoint_v4)
-		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv4.ovpn" # 修复：将 'lz0' 改为正确的 'lzo'
+		local client_config_path="$homeDir/$CLIENT-ipv4.ovpn"
+		cp /etc/openvpn/client-template.txt "$client_config_path"
+
+		# 为 IPv4 客户端设置正确的 proto
+		if [[ $PROTOCOL == 'udp' ]]; then
+			sed -i '/^proto /d' "$client_config_path" # 移除模板中的 proto 行
+			echo "proto udp4" >> "$client_config_path"
+		elif [[ $PROTOCOL == 'tcp' ]]; then
+			sed -i "s/proto tcp[46]*-client/proto tcp4-client/" "$client_config_path"
+		fi
+
 		# 如果是 IPv6 地址，则添加括号
 		if echo "$endpoint_v4" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v4] $port/" "$homeDir/$CLIENT-ipv4.ovpn"
+			sed -i "s/^remote .*/remote [$endpoint_v4] $port/" "$client_config_path"
 		else
-			sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$homeDir/$CLIENT-ipv4.ovpn"
+			sed -i "s/^remote .*/remote $endpoint_v4 $port/" "$client_config_path"
 		fi
 
 		{
@@ -1474,21 +1512,31 @@ function regenerateClient() {
 				cat /etc/openvpn/tls-auth.key
 				echo "</tls-auth>"
 				;;
-			esac
-		} >>"$homeDir/$CLIENT-ipv4.ovpn"
+			esac # 修复：将 'lz0' 改为正确的 'lzo'
+		} >>"$client_config_path"
 		echo ""
 		echo "IPv4 配置文件已重新生成于 $homeDir/$CLIENT-ipv4.ovpn。"
 	fi
 
 	if [[ $CLIENT_PROTO_CHOICE == "2" || $CLIENT_PROTO_CHOICE == "3" ]]; then # IPv6 或 两者
 		local endpoint_v6
-		endpoint_v6=$(cat /etc/openvpn/endpoint_v6)
-		cp /etc/openvpn/client-template.txt "$homeDir/$CLIENT-ipv6.ovpn" # 修复：将 'lz0' 改为正确的 'lzo'
+		endpoint_v6=$(cat /etc/openvpn/endpoint_v6) # 修复：将 'lz0' 改为正确的 'lzo'
+		local client_config_path="$homeDir/$CLIENT-ipv6.ovpn"
+		cp /etc/openvpn/client-template.txt "$client_config_path"
+
+		# 为 IPv6 客户端设置正确的 proto
+		if [[ $PROTOCOL == 'udp' ]]; then
+			sed -i '/^proto /d' "$client_config_path" # 移除模板中的 proto 行
+			echo "proto udp6" >> "$client_config_path"
+		elif [[ $PROTOCOL == 'tcp' ]]; then
+			sed -i "s/proto tcp[46]*-client/proto tcp6-client/" "$client_config_path"
+		fi
+
 		# 如果是 IPv6 地址，则添加括号
 		if echo "$endpoint_v6" | grep -q ':'; then
-			sed -i "s/^remote .*/remote [$endpoint_v6] $port/" "$homeDir/$CLIENT-ipv6.ovpn"
+			sed -i "s/^remote .*/remote [$endpoint_v6] $port/" "$client_config_path"
 		else
-			sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$homeDir/$CLIENT-ipv6.ovpn"
+			sed -i "s/^remote .*/remote $endpoint_v6 $port/" "$client_config_path"
 		fi
 
 		{
@@ -1513,8 +1561,8 @@ function regenerateClient() {
 				cat /etc/openvpn/tls-auth.key
 				echo "</tls-auth>"
 				;;
-			esac
-		} >>"$homeDir/$CLIENT-ipv6.ovpn"
+			esac # 修复：将 'lz0' 改为正确的 'lzo'
+		} >>"$client_config_path"
 		echo ""
 		echo "IPv6 配置文件已重新生成于 $homeDir/$CLIENT-ipv6.ovpn。"
 	fi
