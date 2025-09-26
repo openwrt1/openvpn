@@ -1238,9 +1238,9 @@ function newClient() {
 
         # 获取国家代码用于文件名
         local country
-        # 优先使用 endpoint_v4 的 IP 来查询地理位置
+        # 优先使用 endpoint_v6 的 IP 来查询地理位置，以反映服务器的真实位置
         local query_ip
-        query_ip=$(cat /etc/openvpn/endpoint_v4 2>/dev/null || cat /etc/openvpn/endpoint_v6 2>/dev/null) # 修复：将 'lz0' 改为正确的 'lzo'
+        query_ip=$(cat /etc/openvpn/endpoint_v6 2>/dev/null || cat /etc/openvpn/endpoint_v4 2>/dev/null)
         if ! country=$(curl -s "http://ip-api.com/line/${query_ip}?fields=countryCode" | head -n 1); then
                 echo "警告：无法通过 ip-api.com 查询地理位置，将使用默认文件名。错误信息: $country"
         fi
@@ -1441,9 +1441,9 @@ function regenerateClient() {
 
         # 获取国家代码用于文件名
         local country
-        # 优先使用 endpoint_v4 的 IP 来查询地理位置
+        # 优先使用 endpoint_v6 的 IP 来查询地理位置，以反映服务器的真实位置
         local query_ip
-        query_ip=$(cat /etc/openvpn/endpoint_v4 2>/dev/null || cat /etc/openvpn/endpoint_v6 2>/dev/null) # 修复：将 'lz0' 改为正确的 'lzo'
+        query_ip=$(cat /etc/openvpn/endpoint_v6 2>/dev/null || cat /etc/openvpn/endpoint_v4 2>/dev/null)
         if ! country=$(curl -s "http://ip-api.com/line/${query_ip}?fields=countryCode" | head -n 1); then
                 echo "警告：无法通过 ip-api.com 查询地理位置，将使用默认文件名。错误信息: $country"
         fi
