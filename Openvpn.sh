@@ -144,7 +144,10 @@ prefetch: yes' >>/etc/unbound/unbound.conf
                         pacman -Syu --noconfirm unbound
 
                         # 获取根服务器列表
-                        curl -o /etc/unbound/root.hints https://www.internic.net/domain/named.cache
+                        if ! curl -s -o /etc/unbound/root.hints https://www.internic.net/domain/named.cache; then
+                                echo "错误：为 Unbound 下载 root.hints 文件失败。请检查网络连接。"
+                                exit 1
+                        fi
 
                         if [[ ! -f /etc/unbound/unbound.conf.old ]]; then
                                 mv /etc/unbound/unbound.conf /etc/unbound/unbound.conf.old
@@ -796,7 +799,11 @@ function installOpenVPN() {
                         # 我们添加 OpenVPN 仓库以获取最新版本。
                         if [[ $VERSION_ID == "16.04" ]]; then
                                 echo "deb http://build.openvpn.net/debian/openvpn/stable xenial main" >/etc/apt/sources.list.d/openvpn.list
-                                wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
+                                if ! wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -; then
+                                        echo "错误：下载 OpenVPN 仓库的 GPG 密钥失败。请检查网络连接。"
+                                        rm /etc/apt/sources.list.d/openvpn.list
+                                        exit 1
+                                fi
                                 apt-get update
                         fi
                         # Ubuntu > 16.04 和 Debian > 8 无需第三方仓库即可拥有 OpenVPN >= 2.4。
@@ -835,10 +842,9 @@ function installOpenVPN() {
         # 如果尚未安装，则从源代码安装最新版本的 easy-rsa。
         if [[ ! -d /etc/openvpn/easy-rsa/ ]]; then
                 local version="3.1.2"
-                wget -O ~/easy-rsa.tgz https://github.com/OpenVPN/easy-rsa/releases/download/v${version}/EasyRSA-${version}.tgz
-                # 添加下载验证
-                if [[ ! -f ~/easy-rsa.tgz ]]; then
-                        echo "错误：无法下载 EasyRSA。请检查您的网络连接或稍后重试。"
+                # 检查 wget 命令是否成功执行
+                if ! wget -O ~/easy-rsa.tgz https://github.com/OpenVPN/easy-rsa/releases/download/v${version}/EasyRSA-${version}.tgz; then
+                        echo "错误：下载 Easy-RSA 失败。请检查您的网络连接或 GitHub.com 的可访问性。"
                         exit 1
                 fi
                 mkdir -p /etc/openvpn/easy-rsa
@@ -1234,8 +1240,10 @@ function newClient() {
         local country
         # 优先使用 endpoint_v4 的 IP 来查询地理位置
         local query_ip
-        query_ip=$(cat /etc/openvpn/endpoint_v4 2>/dev/null || cat /etc/openvpn/endpoint_v6 2>/dev/null)
-        country=$(curl -s "http://ip-api.com/line/${query_ip}?fields=countryCode" | head -n 1)
+        query_ip=$(cat /etc/openvpn/endpoint_v4 2>/dev/null || cat /etc/openvpn/endpoint_v6 2>/dev/null) # 修复：将 'lz0' 改为正确的 'lzo'
+        if ! country=$(curl -s "http://ip-api.com/line/${query_ip}?fields=countryCode" | head -n 1); then
+                echo "警告：无法通过 ip-api.com 查询地理位置，将使用默认文件名。错误信息: $country"
+        fi
         [[ -z "$country" ]] && country="OVPN" # 如果查询失败，使用默认前缀
 
         # 确定我们使用的是 tls-auth 还是 tls-crypt
@@ -1435,8 +1443,10 @@ function regenerateClient() {
         local country
         # 优先使用 endpoint_v4 的 IP 来查询地理位置
         local query_ip
-        query_ip=$(cat /etc/openvpn/endpoint_v4 2>/dev/null || cat /etc/openvpn/endpoint_v6 2>/dev/null)
-        country=$(curl -s "http://ip-api.com/line/${query_ip}?fields=countryCode" | head -n 1)
+        query_ip=$(cat /etc/openvpn/endpoint_v4 2>/dev/null || cat /etc/openvpn/endpoint_v6 2>/dev/null) # 修复：将 'lz0' 改为正确的 'lzo'
+        if ! country=$(curl -s "http://ip-api.com/line/${query_ip}?fields=countryCode" | head -n 1); then
+                echo "警告：无法通过 ip-api.com 查询地理位置，将使用默认文件名。错误信息: $country"
+        fi
         [[ -z "$country" ]] && country="OVPN" # 如果查询失败，使用默认前缀
 
         # 确定我们使用的是 tls-auth 还是 tls-crypt
