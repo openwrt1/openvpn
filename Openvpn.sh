@@ -1358,9 +1358,12 @@ function newClient() {
         if [[ $CLIENT_PROTO_CHOICE -eq 0 ]]; then # 服务器不是双栈
                 local client_config_path="$homeDir/${country}[$CLIENT].ovpn"
                 cp /etc/openvpn/client-template.txt "$client_config_path"
+                # 修复：确保无论协议是 UDP 还是 TCP，都写入正确的 proto 指令
                 if [[ $PROTOCOL == 'udp' ]]; then
                         echo "proto udp" >> "$client_config_path"
                         echo "explicit-exit-notify" >> "$client_config_path"
+                elif [[ $PROTOCOL == 'tcp' ]]; then
+                        echo "proto tcp-client" >> "$client_config_path"
                 fi
                 {
                         echo "<ca>"
@@ -1561,9 +1564,12 @@ function regenerateClient() {
         if [[ $CLIENT_PROTO_CHOICE -eq 0 ]]; then # 服务器不是双栈
                 local client_config_path="$homeDir/${country}[$CLIENT].ovpn"
                 cp /etc/openvpn/client-template.txt "$client_config_path"
+                # 修复：确保无论协议是 UDP 还是 TCP，都写入正确的 proto 指令
                 if [[ $PROTOCOL == 'udp' ]]; then
                         echo "proto udp" >> "$client_config_path"
                         echo "explicit-exit-notify" >> "$client_config_path"
+                elif [[ $PROTOCOL == 'tcp' ]]; then
+                        echo "proto tcp-client" >> "$client_config_path"
                 fi
                 {
                         echo "<ca>"
