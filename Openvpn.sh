@@ -1075,6 +1075,8 @@ verb 3" >>/etc/openvpn/server.conf
         fi
         if [[ $NETWORK_MODE == "2" || ($NETWORK_MODE == "1" && $IPV6_SUPPORT == 'y') ]]; then # 仅 IPv6 或在仅 IPv4 模式下启用 IPv6
                 echo 'net.ipv6.conf.all.forwarding=1' >>/etc/sysctl.d/99-openvpn.conf
+                echo 'net.ipv6.conf.all.accept_ra=2' >>/etc/sysctl.d/99-openvpn.conf
+                echo 'net.ipv6.conf.default.accept_ra=2' >>/etc/sysctl.d/99-openvpn.conf
         fi
         # 应用 sysctl 规则
         sysctl --system
