@@ -252,11 +252,13 @@ function installQuestions() {
         echo "检查 IPv6 连接..."
         # "ping6" 和 "ping -6" 可用性因发行版而异
         if type ping6 >/dev/null 2>&1; then
-                PING6="ping6 -c3 ipv6.google.com > /dev/null 2>&1"
+                PINGCMD="ping6 -c3"
         else
-                PING6="ping -6 -c3 ipv6.google.com > /dev/null 2>&1"
+                PINGCMD="ping -6 -c3"
         fi
-        if eval "$PING6"; then
+        
+        # 分别测试 Cloudflare (国际) 和 阿里云 (国内) 的公共 IPv6 地址，以适应不同网络环境
+        if eval "$PINGCMD 2606:4700:4700::1111 > /dev/null 2>&1" || eval "$PINGCMD 2400:3200::1 > /dev/null 2>&1"; then
                 echo "你的主机似乎有 IPv6 连接。"
                 SUGGESTION="y"
         else
