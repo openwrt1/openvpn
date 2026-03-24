@@ -381,9 +381,12 @@ function installQuestions() {
         echo "   10) Yandex Basic (俄罗斯)"
         echo "   11) AdGuard DNS (Anycast: 全球)"
         echo "   12) NextDNS (Anycast: 全球)"
-        echo "   13) 自定义"
-        until [[ $DNS =~ ^[0-9]+$ ]] && [ "$DNS" -ge 1 ] && [ "$DNS" -le 13 ]; do
-                read -rp "DNS [1-12]: " -e -i 11 DNS
+        echo "   13) 阿里 DNS (中国)"
+        echo "   14) 腾讯 DNS (中国)"
+        echo "   15) 114 DNS (中国)"
+        echo "   16) 自定义"
+        until [[ $DNS =~ ^[0-9]+$ ]] && [ "$DNS" -ge 1 ] && [ "$DNS" -le 16 ]; do
+                read -rp "DNS [1-16]: " -e -i 1 DNS
                 if [[ $DNS == 2 ]] && [[ -e /etc/unbound/unbound.conf ]]; then
                         echo ""
                         echo "Unbound 已安装。"
@@ -400,7 +403,7 @@ function installQuestions() {
                                 unset DNS
                                 unset CONTINUE
                         fi
-                elif [[ $DNS == "13" ]]; then
+                elif [[ $DNS == "16" ]]; then
                         until [[ $DNS1 =~ ^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$ ]]; do                                read -rp "主 DNS: " -e DNS1
                         done
                         until [[ $DNS2 =~ ^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$ ]]; do                                read -rp "次要 DNS（可选）: " -e DNS2
@@ -992,7 +995,19 @@ ifconfig-pool-persist ipp.txt"
                         echo 'push "dhcp-option DNS 45.90.28.167"'
                         echo 'push "dhcp-option DNS 45.90.30.167"'
                         ;;
-                13) # 自定义 DNS
+                13) # 阿里 DNS
+                        echo 'push "dhcp-option DNS 223.5.5.5"'
+                        echo 'push "dhcp-option DNS 223.6.6.6"'
+                        ;;
+                14) # 腾讯 DNS
+                        echo 'push "dhcp-option DNS 119.29.29.29"'
+                        echo 'push "dhcp-option DNS 119.28.28.28"'
+                        ;;
+                15) # 114 DNS
+                        echo 'push "dhcp-option DNS 114.114.114.114"'
+                        echo 'push "dhcp-option DNS 114.114.115.115"'
+                        ;;
+                16) # 自定义 DNS
                         echo "push \"dhcp-option DNS $DNS1\""
                         if [[ $DNS2 != "" ]]; then
                                 echo "push \"dhcp-option DNS $DNS2\""
