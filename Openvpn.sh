@@ -416,9 +416,9 @@ function installQuestions() {
         fi
     done
     echo ""
-    echo "你想启用压缩吗？由于 VORACLE 攻击，建议不启用。"
+    echo "你想启用压缩吗？由于 VORACLE 攻击，建议不启用（注意：若选择 'y' 启用压缩，将无法使用 DCO 内核加速技术）。"
     until [[ $COMPRESSION_ENABLED =~ (y|n) ]]; do
-        read -rp"启用压缩？[y/n]: " -e -i n COMPRESSION_ENABLED
+        read -rp "启用压缩？[y/n]: " -e -i n COMPRESSION_ENABLED
     done
     if [[ $COMPRESSION_ENABLED == "y" ]]; then
         echo "选择你要使用的压缩算法：（按效率排序）"
@@ -816,8 +816,17 @@ function installOpenVPN() {
             # Ubuntu > 16.04 和 Debian > 8 无需第三方仓库即可拥有 OpenVPN >= 2.4。
             apt-get install -y openvpn iptables openssl wget ca-certificates curl
         elif [[ $OS == 'centos' ]]; then
-            yum install -y epel-release
-            yum install -y openvpn iptables openssl wget ca-certificates curl tar 'policycoreutils-python*'
+            yum install -y epel-release yum-plugin-copr
+            if command -v dnf &>/dev/null; then
+                # CentOS 8/9, Rocky/Alma Linux
+                dnf copr enable -y @OpenVPN/openvpn-release-2.6
+                dnf copr enable -y dsommers/openvpn3
+                dnf install -y openvpn kmod-ovpn-dco iptables openssl wget ca-certificates curl tar 'policycoreutils-python*'
+            else
+                # CentOS 7 使用 yum
+                yum copr enable -y @OpenVPN/openvpn-release-2.6
+                yum install -y openvpn iptables openssl wget ca-certificates curl tar 'policycoreutils-python*'
+            fi
         elif [[ $OS == 'oracle' ]]; then
             yum install -y oracle-epel-release-el8
             yum-config-manager --enable ol8_developer_EPEL
@@ -929,7 +938,7 @@ keepalive 10 120"
         # 增大 TUN 接口的发送队列长度，减少因高并发/突发流量导致的 TX drops
         echo "txqueuelen 1000"
         # 启用保守的 mssfix 避免加密后的数据包超过公网链路 MTU 导致分片和重传
-        echo "mssfix 1360"
+        echo "mssfix 1300"
         # 即使在仅 IPv6 模式下，也需要 server 指令来定义拓扑结构
         echo "topology subnet
 server 10.8.0.0 255.255.255.0
@@ -1180,7 +1189,7 @@ setenv opt block-outside-dns # 防止 Windows 10 DNS 泄漏
 verb 3" >> /etc/openvpn/client-template.txt
 
     # 启用保守的 mssfix 避免大包分片
-    echo "mssfix 1360" >> /etc/openvpn/client-template.txt
+    echo "mssfix 1300" >> /etc/openvpn/client-template.txt
 
     if [[ $COMPRESSION_ENABLED == "y" ]]; then
         echo "compress $COMPRESSION_ALG" >> /etc/openvpn/client-template.txt
@@ -1414,6 +1423,21 @@ function newClient() {
         echo ""
         echo "配置文件已写入 $client_config_path。"
     fi
+
+    # 检查并输出 DCO 状态
+    echo ""
+    echo "--- OpenVPN DCO 运行状态检查 ---"
+    if openvpn --version | grep -qi "dco"; then
+        if lsmod | grep -q -E "ovpn_dco|ovpn-dco"; then
+            echo "✅ DCO 加速状态：已启用 (ovpn-dco 内核模块已成功加载)"
+        else
+            echo "⚠️ DCO 加速状态：版本支持，但内核模块 (ovpn-dco) 未加载，已降级回普通模式"
+        fi
+    else
+        echo "❌ DCO 加速状态：未启用 (当前安装的 OpenVPN 版本不支持 DCO，请升级到 2.6+)"
+    fi
+    echo "--------------------------------"
+    echo ""
 
     echo "下载 .ovpn 文件并将其导入你的 OpenVPN 客户端。"
     exit 0
