@@ -1,0 +1,24 @@
+name: Deploy OpenVPN Script to VPS
+
+on:
+  push:
+    branches:
+      - main  # 如果您的默认分支是 master 或其他，请修改此处
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Copy Openvpn.sh to VPS
+        run: |
+          scp -P 9922 -o StrictHostKeyChecking=no Openvpn.sh ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }}:~/Openvpn.sh
+          ssh -p 9922 -o StrictHostKeyChecking=no ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} "chmod +x ~/Openvpn.sh"
