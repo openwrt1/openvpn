@@ -938,7 +938,7 @@ keepalive 10 120"
         # 增大 TUN 接口的发送队列长度，减少因高并发/突发流量导致的 TX drops
         echo "txqueuelen 1000"
         # 启用保守的 mssfix 避免加密后的数据包超过公网链路 MTU 导致分片和重传
-        echo "mssfix 1300"
+        echo "mssfix 1160"
         # 即使在仅 IPv6 模式下，也需要 server 指令来定义拓扑结构
         echo "topology subnet
 server 10.8.0.0 255.255.255.0
@@ -1189,7 +1189,7 @@ setenv opt block-outside-dns # 防止 Windows 10 DNS 泄漏
 verb 3" >> /etc/openvpn/client-template.txt
 
     # 启用保守的 mssfix 避免大包分片
-    echo "mssfix 1300" >> /etc/openvpn/client-template.txt
+    echo "mssfix 1160" >> /etc/openvpn/client-template.txt
 
     if [[ $COMPRESSION_ENABLED == "y" ]]; then
         echo "compress $COMPRESSION_ALG" >> /etc/openvpn/client-template.txt
